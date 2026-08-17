@@ -52,9 +52,11 @@ loads). Rung 2 says nothing about rung 3.
 
 ## What a runtime verification looks like here
 
-The pattern that worked, end to end and unattended: export a real multi-item
-character through **dth-character-studio's Runner** (its Daz-side job plugin —
-see `architecture.md` → ecosystem), then measure in `hython` —
+The pattern that worked, end to end and unattended — **on a machine that has
+dth-character-studio and Houdini**, neither of which a contributor's machine
+is assumed to have (`architecture.md` → Neighbors): export a real multi-item
+character through the studio's Runner (its Daz-side job plugin), then measure
+in `hython` —
 point-level FBX-vs-Alembic parity at the rest frame through the production
 import chain, a NaN/magnitude sweep of the Alembic archive, per-frame diff
 against the other generation's export of the same scene, an FBX node listing
