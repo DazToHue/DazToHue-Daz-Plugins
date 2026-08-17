@@ -4,6 +4,33 @@ Two Daz Studio plugins from one source tree, buildable against two Daz Studio
 generations. The value lives in the exporter; the tools plugin is a small
 helper pane.
 
+## Where this sits: the DazToHue ecosystem
+
+This repo is ONE stage of a pipeline, and the stages around it matter for how
+you work here:
+
+- **[dth-character-studio](https://github.com/polynaut/dth-character-studio)**
+  (separate repo, same author) sits upstream: from one character definition it
+  generates BOTH sides of a Range of Motion — the Daz apply-script (`.dsa`)
+  that dials the scene frame by frame, and the Houdini PoseAsset import CSV.
+  It also ships a Daz **Runner** plugin that executes jobs in Daz Studio
+  **unattended** — including driving this exporter's `Q_INVOKABLE doExport`
+  entry points. The studio's own `.ai/` docs keep a *measured contract of this
+  exporter* (its `domain-exporter.md` / `gotchas-daz.md`) — when this repo's
+  behavior changes observably, that contract is what breaks downstream.
+- **This exporter** consumes the scene the ROM script prepared and produces
+  the FBX ROM, Alembic ROM, reference frames, and the `.dth` manifest.
+- **Houdini** imports those via the DazToHue chain; `hython` is how exports
+  get measured (point-level FBX-vs-Alembic parity, NaN sweeps — see
+  `verification.md`).
+
+Practical consequence for agents: **runtime verification here does not
+require a human clicking through Daz Studio and Houdini.** The measured
+results in this repo's PRs came from unattended Runner-job exports plus
+hython probes. Before asking the human to drive either application by hand,
+check whether the studio's Runner + a hython script can measure it — the
+human's clicks are the fallback, not the default.
+
 ## The one-tree / two-SDK design
 
 `DAZ_SDK_VERSION` (4 or 6) is the **only** switch (top-level `CMakeLists.txt`).

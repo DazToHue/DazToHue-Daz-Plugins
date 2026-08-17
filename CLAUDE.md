@@ -14,6 +14,12 @@ together. **DazToHueTools** is a small pane for toggling node visibility before
 export. One source tree builds both plugins for **two Daz Studio generations**
 (DS4 and DS6); Windows x64 only.
 
+Upstream sits **dth-character-studio** (separate repo): it generates the ROM
+script that prepares the scene this exporter consumes, and its Runner plugin
+can drive Daz — including this exporter's entry points — **unattended**.
+Runtime verification goes through that path plus `hython` probes, not through
+a human clicking Daz/Houdini (`.ai/architecture.md` → ecosystem).
+
 ## Commands
 
 ```powershell
