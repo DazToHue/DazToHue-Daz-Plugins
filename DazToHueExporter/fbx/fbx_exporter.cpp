@@ -566,10 +566,17 @@ void DthFbxExporter::exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& 
 			}
 		}
 
-		// Set the frame
+		// Set the key time in SECONDS, not frames: SetFrame() interprets the
+		// index under the FBX SDK's global default time mode (24 fps), NOT the
+		// file's declared rate, so in a 30 fps file every key landed 1.25x late
+		// - exact at frame 0, a full pose off deep into the ROM. Measured
+		// 2026-08-17 against a DzFbxExporter-baked reference: at frame 100 the
+		// reference skin sat 1.06 cm from rest exactly like the Alembic, while
+		// frame-stamped keys played a pose 127 cm away. Daz ticks are 1/4800 s,
+		// which makes seconds frame-rate-proof.
 		FbxTime Time;
 		int KeyIndex = 0;
-		Time.SetFrame(Frame);
+		Time.SetSecondDouble((double)CurrentTime / 4800.0);
 
 		// Write X Rot
 		FbxAnimCurve* RotXCurve = Node->LclRotation.GetCurve(AnimBaseLayer, "X", true);
