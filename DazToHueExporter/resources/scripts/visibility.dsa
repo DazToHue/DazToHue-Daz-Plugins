@@ -1,0 +1,156 @@
+function getShape(node) {
+	try {	
+	    var object = node.getObject();
+	    if (!object) return null;
+	    var shape = object.getCurrentShape();
+	    if (!shape) return null;
+	    return shape;
+    
+    } catch (err) {
+	    return null;
+	}
+}
+function getFacetMesh(shape) {
+	try {   
+		var facetMesh = shape.getGeometry();
+		if (!facetMesh) return null;
+		if (!facetMesh.inherits("DzFacetMesh")) return null;
+		return facetMesh;
+    } catch (err) {
+	    return null;
+	}    
+};
+function getCachedGeometry(object) {
+    var cachedGeometry = object.getCachedGeom();
+    if (!cachedGeometry) return null;
+    return cachedGeometry;
+};
+function generateJSON(data)
+{
+    function qtStringify(obj)
+    {
+        if (obj === null)
+        {
+            return "null";
+        }
+        if (typeof obj === "object")
+        {
+            if (obj.constructor === Array)
+            {
+                var items = new Array();
+                for (var i = 0; i < obj.length; ++i)
+                {
+                    items.push(qtStringify(obj[i]));
+                }
+                return "[" + items.join(",") + "]";
+            }
+            else
+            {
+                var items = new Array();
+                for (var key in obj)
+                {
+                    if (obj.hasOwnProperty(key))
+                    {
+                        items.push('"' + key + '":' + qtStringify(obj[key]));
+                    }
+                }
+                return "{" + items.join(",") + "}";
+            }
+        }
+        if (typeof obj === "string")
+        {
+            return '"' + obj + '"';
+        }
+        return String(obj);
+    }
+    return qtStringify(data);
+}
+function modelVisibility() {
+    var result = new Object();
+	result.status = "success";
+	var problemNodes = new Array();
+	var visibilityResults = new Array();
+	var objVisibility = new Object();
+    nodeCount = Scene.getNumNodes();
+    for (i = 0; i < nodeCount; i++) {
+        var node = Scene.getNode(i);
+        if(node.inherits("DzFigure") == false && node.inherits("DzGeometryShellNode") == false) {
+			continue;
+		}
+		var objVisibility = new Object();
+		objVisibility.label = node.getLabel();
+		objVisibility.hiddenMaterials = new Array();
+		objVisibility.hiddenFacegroups = new Array();
+		objVisibility.hiddenFaces = new Array();
+		if (node.inherits("DzGeometryShellNode")) {
+            shape = getShape(node);
+            if(shape) {
+                fm = getFacetMesh(shape);
+                if(fm) {
+                    var materialsCount = shape.getNumMaterials();
+					var j;                    
+                    for(j = 0; j < materialsCount; j++) {
+                        var materialName = shape.getMaterial(j).getName();
+                        var control = node.findMaterialGroupVisibilityControl(materialName);
+                        if (control) {
+                            var visible = control.getValue();
+							if(visible == 0) {
+								objVisibility.hiddenMaterials.push(materialName);
+							}
+                        } else {
+                            objVisibility.hiddenMaterials.push(materialName);
+                        }
+                    }
+                    var targetNode = node.getTarget();
+                    var facetMesh = getFacetMesh(getShape(targetNode));
+                    if(facetMesh){
+						var faceGroupCount = facetMesh.getNumFaceGroups();
+						for (j = 0; j < faceGroupCount; j++) {
+							var groupName = facetMesh.getFaceGroup(j).getName();
+							var control = node.findFacetGroupVisibilityControl(groupName);
+							if (control) {
+								var visible = control.getValue();
+								if(visible == 0) {
+									objVisibility.hiddenFacegroups.push(groupName);
+								}
+							} else {
+								objVisibility.hiddenFacegroups.push(groupName);
+							}
+						}
+                    }
+
+                } else {
+	               result.status = "failed";
+					problemNodes.push(node.getLabel());
+				}
+            } else {
+	           result.status = "failed";
+				problemNodes.push(node.getLabel());
+			}
+        }
+		var cachedGeometry = getCachedGeometry(node.getObject());
+		if (cachedGeometry) {
+			var numFacets = cachedGeometry.getNumFacets();				
+			for (var j = 0; j < numFacets; j++) {
+			   if(Geometry.isFaceHidden(cachedGeometry, j)) {
+					objVisibility.hiddenFaces.push(j);
+			   }
+			}
+		} else {
+			result.status = "failed";
+			problemNodes.push(node.getLabel());
+		}
+		visibilityResults.push(objVisibility);
+    }
+	result.problemNodes = problemNodes;
+	result.visibility = visibilityResults;
+    return result;
+}
+// Wrapped in a function (the DS4 shape) rather than run at top level: the C++
+// side calls it with DzScript::call("execute", args), which exists in both the
+// DS4 and DS6 SDKs - so one script serves both generations.
+function execute() {
+    var data = modelVisibility();
+    var json = generateJSON(data);
+    return json;
+}

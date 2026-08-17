@@ -1,0 +1,9 @@
+build-sdk4/
+build-sdk6/
+build/
+.vs/
+*.aps
+*.user
+*.pdb
+*.ilk
+*.exp

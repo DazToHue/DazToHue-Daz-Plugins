@@ -1,0 +1,8 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/dth_images">
+        <file alias="icon">images/action_icon.png</file>
+    </qresource>
+    <qresource prefix="/dth_scripts">
+    </qresource>  
+</RCC>
