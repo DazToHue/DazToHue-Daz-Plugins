@@ -66,7 +66,18 @@ Qt stderr warning becomes a fake failure (`.ai/gotchas-build.md`).
 transparent limitation is always preferable to an incorrect answer presented
 confidently — missing knowledge can be filled in, incorrect knowledge silently
 spreads.** Never claim something works unless it was actually verified; say
-what was tested and what wasn't; mark inferences as inferences. In this repo
+what was tested and what wasn't; mark inferences as inferences.
+
+**Evidence over hypothesis.** A plausible story is a hypothesis, not a
+finding — when the source, the SDK headers, or a measurement can settle a
+question, settle it that way before answering or acting. Repeatedly proven
+here: a "does X matter?" question answered by reading the actual property
+reads instead of folklore; a regression attributed by isolating runs instead
+of narrative; a root cause that turned out to live in a different repo than
+the plausible suspect. When evidence can't be obtained, say so and label the
+hypothesis as one.
+
+In this repo
 that has a sharp edge: most behavior only exists inside a running Daz Studio,
 and a header is not an ABI — state the rung of `.ai/verification.md` every
 claim sits on. The full version is **`.ai/philosophy.md`**, injected into

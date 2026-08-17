@@ -25,6 +25,11 @@ vendor, or one tool. It applies to any agent working in this repo.
   memory about code that is one `grep` away. This applies doubly to the SDK
   headers: they sit on disk next to the project, and half of `gotchas-sdk.md`
   exists because a header was read instead of assumed.
+- Evidence over hypothesis. A plausible story is a hypothesis, not a finding —
+  when a question can be settled by reading source or running a measurement,
+  settle it that way before answering or acting on it. A hypothesis that
+  can't be tested right now is stated as a hypothesis, with what it would
+  take to test it.
 - **A header is not an ABI.** In this repo even reading is only half the
   evidence: a declaration proves what compiles, never what links or runs
   (`DzScript::call()` is declared in the DS6 SDK and unresolved at link).
