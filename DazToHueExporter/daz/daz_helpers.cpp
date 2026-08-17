@@ -73,6 +73,16 @@ void DazHelpers::preprocessScene()
 	}
 
 	processSubdivisionLevels();
+
+	// Detach hidden children (the workflow scripts hide hair items) BEFORE any
+	// export runs: DzFbxExporter ignores visibility on fitted followers, so a
+	// hidden hair item stays in the FBX unless it is unparented - the Alembic
+	// is unaffected because its decoder checks isVisible itself. The
+	// predecessor tree made this call at the end of processSelected(); it was
+	// lost in the refactor (measured 2026-08-17: lash meshes present in the
+	// exported FBX, absent from the Alembic). reparentHiddenNodes() restores
+	// the children after the export.
+	unparentHiddenNodes(selectedRootNode_);
 }
 
 void DazHelpers::gatherCandidateNodes(DzNode* rootNode)
