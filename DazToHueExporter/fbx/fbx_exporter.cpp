@@ -97,21 +97,21 @@ void DthFbxExporter::injectRomAnimation(QString fbxPath)
 	// sides name them with DzNode::getName(), and exportNodeAnimation() skips
 	// any node the map does not resolve.
 	QMap<DzNode*, FbxNode*> boneMap;
-	int unresolved = 0;
+	QStringList unresolvedNames;
 
 	FbxNode* figureFbxNode = openFBX->findNode(scene, figure->getName());
-	if (figureFbxNode != nullptr) boneMap.insert(figure, figureFbxNode); else unresolved++;
+	if (figureFbxNode != nullptr) boneMap.insert(figure, figureFbxNode); else unresolvedNames.append(figure->getName());
 
 	DzBoneList bones = dazHelpers_.getAllBones(selectedRootNode_);
 	for (auto bone : bones)
 	{
 		FbxNode* boneFbxNode = openFBX->findNode(scene, bone->getName());
-		if (boneFbxNode != nullptr) boneMap.insert(bone, boneFbxNode); else unresolved++;
+		if (boneFbxNode != nullptr) boneMap.insert(bone, boneFbxNode); else unresolvedNames.append(bone->getName());
 	}
 
-	if (dthLogger_ != nullptr && unresolved > 0)
+	if (dthLogger_ != nullptr && !unresolvedNames.isEmpty())
 	{
-		dthLogger_->log(LogLevel::DTHWARNGING, QString("%1 of %2 skeleton nodes were not found in the exported FBX - their ROM animation is missing").arg(unresolved).arg(bones.count() + 1));
+		dthLogger_->log(LogLevel::DTHWARNGING, QString("%1 of %2 skeleton nodes were not found in the exported FBX - their ROM animation is missing: %3").arg(unresolvedNames.count()).arg(bones.count() + 1).arg(unresolvedNames.join(", ")));
 	}
 
 	exportNodeAnimation(figure, boneMap, animBaseLayer, figureScale);
