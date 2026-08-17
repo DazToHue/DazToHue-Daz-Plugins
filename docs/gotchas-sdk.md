@@ -66,8 +66,12 @@ Where a bug was reported to Daz, the support ticket number is next to it.
   geoshell. A protection keyed on `DzProperty::hasKeys()` covers the master and
   leaves every follower exposed. Characters without keyed shape dials in the
   ROM are unaffected — which is why only some characters ever showed the bug.
-  This tree avoids the baker structurally (mesh export with `doAnims=false`,
-  animation injected afterwards — see `fbx/fbx_exporter.cpp`).
+  The mitigation lives UPSTREAM, not in this tree: dth-character-studio's ROM
+  generation guarantees every walked morph evaluates to 0 at frame 0
+  (polynaut/dth-character-studio#873), which makes the baker's drive-to-zero a
+  no-op. A structural workaround in the exporter (mesh export with
+  `doAnims=false`, animation injected afterwards) was prototyped and closed
+  unmerged once that root cause was found — see PR #1.
 - **`DzProperty::lock()` is SELECTIVE, and the mechanism is unknown.** The
   predecessor tree worked around the baker by locking every numeric property
   during `writeFile()`: the drive-to-zero was stopped entirely, yet the same
@@ -91,13 +95,15 @@ Where a bug was reported to Daz, the support ticket number is next to it.
   wrong (median ~1 cm, peaks 10 cm). The fix is
   `DzObject::forceCacheUpdate(node)` before every read — declared identically
   on both generations (`dzobject.h`), and virtual, so it cannot hit the
-  `DzScript::call()` missing-export trap. See
-  `alembic/sagan/decoder/alembic_node_decoder.cpp`.
+  `DzScript::call()` missing-export trap. The fix lands with PR #2
+  (`fix/ds6-alembic-stale-mesh`, touching
+  `alembic/sagan/decoder/alembic_node_decoder.cpp`); until that merges, `main`
+  still has the stale-read behavior on DS6.
 - **`forceCacheUpdate()` on a STRAND-BASED HAIR node hangs DS6** (>8 minutes at
   0% on an operation that takes ~2 s without it; Daz ticket **503956**), and a
   DS6 session later crashed fatally at groom-archive creation in the same area.
   The force is therefore confined to the ROM frame loop and skips SBH nodes;
-  the groom-poses path is left untouched.
+  the groom-poses path is left untouched. (Same PR #2 as above.)
 - **The DS6 SDK is beta.** A rebuild against the final SDK may be needed when it
   goes GA, and an SDK newer than the oldest Daz Studio you support can reference
   `dzcore` exports that Studio lacks — which surfaces as *"requires a newer
