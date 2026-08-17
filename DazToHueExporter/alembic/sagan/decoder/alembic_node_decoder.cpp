@@ -37,6 +37,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dzscene.h"
 #include "dzfigure.h"
+#include "dzobject.h"
 
 #include "../../../version.h"
 
@@ -226,6 +227,30 @@ void Sagan::AlembicNodeDecoder::initObject(DzNode* node, const AlembicObjectPtr&
 
 	// Decode child nodes
 	decodeChildNodes(node, parent);
+}
+
+void Sagan::AlembicNodeDecoder::updateGeometryCaches() const
+{
+	// getCachedGeom() only holds what the last COMPLETED evaluation produced.
+	// Daz Studio 6 defers mesh evaluation after dzScene->setFrame() - the
+	// viewport visibly settles late when scrubbing - so without forcing the
+	// update, every ROM frame sampled a mesh that lagged the scene by a
+	// varying amount and the exported Alembic drifted on every frame (Daz
+	// ticket 503955). DS4 evaluates synchronously and never needed this.
+	// forceCacheUpdate() is declared identically on both generations.
+	//
+	// Called from the ROM frame loop ONLY, never from the groom-poses path:
+	// forceCacheUpdate() on a strand-based-hair node hung the DS6 groom export
+	// indefinitely (Daz ticket 503956 - the first groom frame sat >8 minutes
+	// at 0% until the process was killed; without the force the same grooms
+	// exported in ~2s each). The SBH skip below is belt-and-braces for fitted
+	// SBH items that survive into a ROM export unhidden.
+	for (const auto& node : m_exportableNodes)
+	{
+		if (DazStaticHelpers::isStrandBasedHair(node)) continue;
+
+		if (DzObject* object = node->getObject()) object->forceCacheUpdate(node);
+	}
 }
 
 void Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const

@@ -59,6 +59,7 @@ namespace Sagan
 		~AlembicNodeDecoder();
 
 		void decodeSelected(DzNode* selectedRootNode);
+		void updateGeometryCaches() const;
 		void writeObjects(bool firstFrame) const;
 		void setShapeNameFormatter(NodeNameFormatterCallbackType nodeNameFormatter);
 		std::string getFormattedShapeNameAsString(DzNode* node);

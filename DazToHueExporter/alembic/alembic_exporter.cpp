@@ -60,6 +60,11 @@ void DthAlembicExporter::doRomExport()
 
 		QApplication::processEvents();
 
+		// DS6 defers evaluation past setFrame(); without this every frame reads
+		// a stale mesh (see updateGeometryCaches). The groom-poses loop below
+		// deliberately does NOT do this - forcing an SBH node hangs DS6.
+		alembicNodeDecoder.updateGeometryCaches();
+
 		alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
 
 		alembicProgress.step();
