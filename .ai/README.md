@@ -10,7 +10,7 @@ archaeology.
 
 | File | Read it when… |
 |---|---|
-| [philosophy.md](philosophy.md) | **always.** Epistemic honesty over perceived helpfulness: what to do when the rules elsewhere don't cover the case. Model-agnostic. |
+| [philosophy.md](philosophy.md) | **always — it is injected into every session** (with the Working rules) by `.claude/hooks/inject-agent-context.ps1`. Epistemic honesty over perceived helpfulness: what to do when the rules elsewhere don't cover the case. Model-agnostic. |
 | [architecture.md](architecture.md) | you need the lay of the land: the two plugins, the one-tree/two-SDK design, the export pipeline, the compat layer, the SubD mechanism. |
 | [conventions.md](conventions.md) | you branch, commit, open a PR, or install a build — the working rules and repo mechanics. |
 | [gotchas-sdk.md](gotchas-sdk.md) | you touch anything that calls into the Daz SDK or Qt — measured DS4/DS6 facts (with Daz ticket numbers) that headers alone won't tell you. |

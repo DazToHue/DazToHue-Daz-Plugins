@@ -40,7 +40,10 @@ alternative to doing it.
 - **Branches:** work branches off `main`, named by intent — `fix/…`,
   `docs/…` (measured examples: `fix/unparent-hidden-nodes`,
   `docs/measured-knowledge`). Push the branch to `origin` with upstream
-  tracking before the session ends.
+  tracking before the session ends — enforced by
+  `.claude/hooks/check-branch-upstream.ps1` (a `git push` from an untracked
+  branch fails the turn). Branch config only — `origin` stays as it is, never
+  reconfigure the remote.
 - **`main` is merged by the repo owner.** Contributors open PRs; merging —
   and deleting the merged branch — is mrpdean's call. Closing your own
   superseded PR (with a comment saying why, linking the real fix) is fine and

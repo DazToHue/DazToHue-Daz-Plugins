@@ -69,9 +69,10 @@ spreads.** Never claim something works unless it was actually verified; say
 what was tested and what wasn't; mark inferences as inferences. In this repo
 that has a sharp edge: most behavior only exists inside a running Daz Studio,
 and a header is not an ABI — state the rung of `.ai/verification.md` every
-claim sits on. The full version is **`.ai/philosophy.md`**; it outranks any
-single rule here. It is deliberately model-agnostic: it holds for any agent in
-this repo.
+claim sits on. The full version is **`.ai/philosophy.md`**, injected into
+every session (with the Working rules) by
+`.claude/hooks/inject-agent-context.ps1`; it outranks any single rule here. It
+is deliberately model-agnostic: it holds for any agent in this repo.
 
 ## Communication
 
