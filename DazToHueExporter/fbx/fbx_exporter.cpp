@@ -57,9 +57,78 @@ void DthFbxExporter::exportRoms()
 		if (dthWriter_ != nullptr) dthWriter_->setFbxRomPath(characterHDExportPath_);
 	}
 
+	// The mesh was exported with doAnims=false (see setFbxRomExportOptions for
+	// why), so the ROM's bone animation is baked into the finished file here,
+	// via the raw FBX SDK, without ever running DzFbxExporter's baker.
+	injectRomAnimation(dazHelpers_.hasSubdivisions() ? characterHDExportPath_ : characterBaseExportPath_);
+
 	dzScene->setFrame(startFrame);
 
 	QApplication::processEvents();
+}
+
+void DthFbxExporter::injectRomAnimation(QString fbxPath)
+{
+	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Injecting ROM animation into %1").arg(fbxPath));
+
+	exportProgress_.setCurrentInfo("Baking ROM animation into " + selectedRootNode_->getLabel() + " FBX");
+
+	DzSkeleton* skeleton = selectedRootNode_->getSkeleton();
+	DzFigure* figure = skeleton ? qobject_cast<DzFigure*>(skeleton) : NULL;
+
+	if (!figure) return;
+
+	OpenFBXInterface* openFBX = OpenFBXInterface::GetInterface();
+	FbxScene* scene = openFBX->createScene("Anim Inject Scene");
+	if (openFBX->loadScene(scene, fbxPath.toUtf8().data()) == false)
+	{
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHERROR, QString("Could not reload %1 to inject the ROM animation - the FBX has NO animation").arg(fbxPath));
+		QMessageBox::warning(0, "Error", "An error occurred while reloading the FBX to add the ROM animation - the exported FBX has no animation", QMessageBox::Ok);
+		return;
+	}
+
+	FbxAnimStack* animStack = FbxAnimStack::Create(scene, "AnimStack");
+	FbxAnimLayer* animBaseLayer = FbxAnimLayer::Create(scene, "Layer0");
+	animStack->AddMember(animBaseLayer);
+
+	float figureScale = selectedRootNode_->getScaleControl()->getValue();
+
+	// Map the figure and its bones onto the nodes DzFbxExporter wrote - both
+	// sides name them with DzNode::getName(), and exportNodeAnimation() skips
+	// any node the map does not resolve.
+	QMap<DzNode*, FbxNode*> boneMap;
+	int unresolved = 0;
+
+	FbxNode* figureFbxNode = openFBX->findNode(scene, figure->getName());
+	if (figureFbxNode != nullptr) boneMap.insert(figure, figureFbxNode); else unresolved++;
+
+	DzBoneList bones = dazHelpers_.getAllBones(selectedRootNode_);
+	for (auto bone : bones)
+	{
+		FbxNode* boneFbxNode = openFBX->findNode(scene, bone->getName());
+		if (boneFbxNode != nullptr) boneMap.insert(bone, boneFbxNode); else unresolved++;
+	}
+
+	if (dthLogger_ != nullptr && unresolved > 0)
+	{
+		dthLogger_->log(LogLevel::DTHWARNGING, QString("%1 of %2 skeleton nodes were not found in the exported FBX - their ROM animation is missing").arg(unresolved).arg(bones.count() + 1));
+	}
+
+	exportNodeAnimation(figure, boneMap, animBaseLayer, figureScale);
+
+	for (auto bone : bones)
+	{
+		exportNodeAnimation(bone, boneMap, animBaseLayer, figureScale);
+	}
+
+	if (openFBX->saveScene(scene, fbxPath) == false)
+	{
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHERROR, QString("Could not save %1 after injecting the ROM animation").arg(fbxPath));
+		QMessageBox::warning(0, "Error", "An error occurred while saving the FBX with the ROM animation", QMessageBox::Ok);
+		return;
+	}
+
+	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Finished injecting ROM animation (%1 skeleton nodes)").arg(boneMap.size()));
 }
 
 void DthFbxExporter::exportBaseFbx()
@@ -249,6 +318,12 @@ void DthFbxExporter::exportAnimationOnly(QString animationName)
 
 		DzFileIOSettings* exportOptions = new DzFileIOSettings();
 		setFbxRomExportOptions(*exportOptions);
+
+		// This IS an animation export, so the baker has to run. Note the mesh
+		// embedded in this file still suffers the morph flattening described in
+		// setFbxRomExportOptions - unchanged behaviour, consumers of these
+		// animation clips must not use their mesh.
+		exportOptions->setBoolValue("doAnims", true);
 
 		characterBaseExportPath_ = exportDirectory_ + "/" + characterName_ + "_" + animationName + "_animation.fbx";
 
@@ -640,7 +715,17 @@ void DthFbxExporter::setFbxRomExportOptions(DzFileIOSettings& exportOptions)
 	exportOptions.setBoolValue("doProps", true);
 	exportOptions.setBoolValue("doLights", false);
 	exportOptions.setBoolValue("doCameras", false);
-	exportOptions.setBoolValue("doAnims", true);
+	// doAnims MUST stay false for mesh exports: DzFbxExporter's animation baker
+	// drives every keyed morph channel (and its auto-follow copies on fitted
+	// items) to zero DURING writeFile() and captures the mesh in that state,
+	// restoring the values before returning - so the exported mesh has the
+	// character's keyed shape morphs flattened while the scene looks untouched.
+	// Measured with a property watcher on DS 4.24.0.4 and DS 6.25 (Daz ticket
+	// 503954): 18 channels driven below a non-zero start, only 5 of them keyed,
+	// the other 13 unkeyed followers on clothing/geograft/geoshell. The ROM's
+	// bone animation is added afterwards by injectRomAnimation(), which never
+	// runs the baker. exportAnimationOnly() overrides this to true on purpose.
+	exportOptions.setBoolValue("doAnims", false);
 	exportOptions.setBoolValue("doMorphs", false);
 	exportOptions.setStringValue("rules", "");
 	exportOptions.setBoolValue("doLocks", false);

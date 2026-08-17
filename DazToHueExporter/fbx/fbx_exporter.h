@@ -29,6 +29,7 @@ public:
 	void exportRoms();
 	void exportBaseFbx();
 	void exportSubdividedFbx();
+	void injectRomAnimation(QString fbxPath);
 	void exportExperimentalRomAnimation();
 	void exportAnimationOnly(QString animationName);
 	bool subdivideFbx(QString baseFilePath, QString hdFilePath, QString outFilePath, std::map<std::string, int>* pLookupTable);
