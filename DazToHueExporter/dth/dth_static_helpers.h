@@ -2,6 +2,8 @@
 
 #include <filesystem>
 
+#include <QtCore/QStringList>
+
 #include "dzapp.h"
 
 namespace DthStaticHelpers
@@ -14,5 +16,8 @@ namespace DthStaticHelpers
 	std::vector<int> parseNumberString(const std::string& input);
 	int countNumberString(const std::string& input);
 	bool createDirectory(const QString& filePath);
+	int removeStaleRomExportSet(const QString& exportDirectory, const QString& characterName, QStringList* failedRemovals = nullptr);
+	int removeStaleAnimationExport(const QString& exportDirectory, const QString& characterName, const QString& animationName);
+	int removeStaleGroomExport(const QString& exportDirectory, const QString& characterName);
 
 }
