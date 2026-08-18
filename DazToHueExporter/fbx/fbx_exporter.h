@@ -32,8 +32,8 @@ public:
 	void exportExperimentalRomAnimation();
 	void exportAnimationOnly(QString animationName);
 	bool subdivideFbx(QString baseFilePath, QString hdFilePath, QString outFilePath, std::map<std::string, int>* pLookupTable);
-	void generateSkeleton(DzFigure* figure, DzNode* node, DzNode* parent, FbxNode* fbxParent, FbxScene* scene, QMap<DzNode*, FbxNode*>& boneMap);
-	void exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& BoneMap, FbxAnimLayer* AnimBaseLayer, float FigureScale);
+	void generateSkeleton(DzFigure* figure, DzNode* node, DzNode* parent, FbxNode* fbxParent, FbxScene* scene, QMap<DzNode*, FbxNode*>& boneMap, QMap<DzNode*, DzNode*>& exportParentMap);
+	void exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& BoneMap, QMap<DzNode*, DzNode*>& ExportParentMap, FbxAnimLayer* AnimBaseLayer, float FigureScale);
 	void exportSkeletonReferenceFrames(QString referenceFrames);
 	void applyReferenceFrameProperties(SkeletonReferenceFrameProperties skeletonReferenceFrameProperties);
 	void restoreReferenceFrameProperties(SkeletonReferenceFrameProperties skeletonReferenceFrameProperties);

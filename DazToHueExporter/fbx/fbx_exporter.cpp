@@ -212,19 +212,20 @@ void DthFbxExporter::exportExperimentalRomAnimation()
 
 	// Add the skeleton to the scene
 	QMap<DzNode*, FbxNode*> boneMap;
-	generateSkeleton(figure, selectedRootNode_, nullptr, nullptr, scene, boneMap);
+	QMap<DzNode*, DzNode*> exportParentMap;
+	generateSkeleton(figure, selectedRootNode_, nullptr, nullptr, scene, boneMap, exportParentMap);
 
 	// Get the play range
 	DzTimeRange PlayRange = dzScene->getPlayRange();
 
 	// Root Node
-	exportNodeAnimation(figure, boneMap, animBaseLayer, figureScale);
+	exportNodeAnimation(figure, boneMap, exportParentMap, animBaseLayer, figureScale);
 
 	// Iterate the bones
 	DzBoneList Bones = dazHelpers_.getAllBones(selectedRootNode_);
 	for (auto Bone : Bones)
 	{
-		exportNodeAnimation(Bone, boneMap, animBaseLayer, figureScale);
+		exportNodeAnimation(Bone, boneMap, exportParentMap, animBaseLayer, figureScale);
 	}
 
 	// Write the FBX
@@ -295,7 +296,7 @@ bool DthFbxExporter::subdivideFbx(QString baseFilePath, QString hdFilePath, QStr
 	return true;
 }
 
-void DthFbxExporter::generateSkeleton(DzFigure* figure, DzNode* node, DzNode* parent, FbxNode* fbxParent, FbxScene* scene, QMap<DzNode*, FbxNode*>& boneMap)
+void DthFbxExporter::generateSkeleton(DzFigure* figure, DzNode* node, DzNode* parent, FbxNode* fbxParent, FbxScene* scene, QMap<DzNode*, FbxNode*>& boneMap, QMap<DzNode*, DzNode*>& exportParentMap)
 {
 	FbxNode* boneNode;
 
@@ -315,7 +316,7 @@ void DthFbxExporter::generateSkeleton(DzFigure* figure, DzNode* node, DzNode* pa
 		for (int childIndex = 0; childIndex < node->getNumNodeChildren(); childIndex++)
 		{
 			DzNode* childNode = node->getNodeChild(childIndex);
-			generateSkeleton(figure, childNode, node, boneNode, scene, boneMap);
+			generateSkeleton(figure, childNode, node, boneNode, scene, boneMap, exportParentMap);
 		}
 	}
 	else
@@ -356,7 +357,7 @@ void DthFbxExporter::generateSkeleton(DzFigure* figure, DzNode* node, DzNode* pa
 				{
 					directChildBones.append(childBone->getName());
 				}
-				generateSkeleton(figure, childNode, node, boneNode, scene, boneMap);
+				generateSkeleton(figure, childNode, node, boneNode, scene, boneMap, exportParentMap);
 			}
 
 			// Add child figure bones
@@ -377,7 +378,7 @@ void DthFbxExporter::generateSkeleton(DzFigure* figure, DzNode* node, DzNode* pa
 								if (!directChildBones.contains(childBone->getName()))
 								{
 									directChildBones.append(childBone->getName());
-									generateSkeleton(figure, childNode, node, boneNode, scene, boneMap);
+									generateSkeleton(figure, childNode, node, boneNode, scene, boneMap, exportParentMap);
 								}
 							}
 						}
@@ -389,9 +390,19 @@ void DthFbxExporter::generateSkeleton(DzFigure* figure, DzNode* node, DzNode* pa
 
 	// Add the bone to the map
 	boneMap.insert(node, boneNode);
+
+	// Record the parent this bone was actually attached under in the exported
+	// hierarchy. This is usually the same as node->getNodeParent(), but for a
+	// grafted child-figure bone (see "Add child figure bones" above) it isn't:
+	// e.g. a conforming mouth figure's "LowerJaw" is grafted under the primary
+	// figure's "head" bone here, while LowerJaw->getNodeParent() is still the
+	// mouth figure's own node. exportNodeAnimation needs this export parent -
+	// not the true Daz parent - to compute a position/rotation that's correct
+	// relative to whatever this bone is actually parented to in the FBX.
+	exportParentMap.insert(node, parent);
 }
 
-void DthFbxExporter::exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& BoneMap, FbxAnimLayer* AnimBaseLayer, float FigureScale)
+void DthFbxExporter::exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& BoneMap, QMap<DzNode*, DzNode*>& ExportParentMap, FbxAnimLayer* AnimBaseLayer, float FigureScale)
 {
 	DzTimeRange PlayRange = dzScene->getPlayRange();
 
@@ -423,7 +434,6 @@ void DthFbxExporter::exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& 
 		DefaultPosition.m_x = Bone->getOriginXControl()->getValue(CurrentTime);
 		DefaultPosition.m_y = Bone->getOriginYControl()->getValue(CurrentTime);
 		DefaultPosition.m_z = Bone->getOriginZControl()->getValue(CurrentTime);
-		DzMatrix3 Scale = Bone->getWSScale();
 
 		DzVec3 Position;
 		Position.m_x = Bone->getXPosControl()->getValue(CurrentTime);
@@ -440,13 +450,32 @@ void DthFbxExporter::exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& 
 
 		// Scale
 		DzVec3 ControlScale(1.0f, 1.0f, 1.0f);
-		FigureScale = Bone->getScaleControl()->getValue(CurrentTime);
-		ControlScale.m_x = Bone->getXScaleControl()->getValue(CurrentTime) * FigureScale;
-		ControlScale.m_y = Bone->getYScaleControl()->getValue(CurrentTime) * FigureScale;
-		ControlScale.m_z = Bone->getZScaleControl()->getValue(CurrentTime) * FigureScale;
+		if (qobject_cast<DzFigure*>(Bone) == nullptr)
+		{
+			// The synthetic "root" FBX node (mapped from the primary DzFigure) is
+			// deliberately left at identity scale here. Its Scale control is instead
+			// baked directly into its immediate children's positions above (see the
+			// isRootNode/DzFigure branch below), because this exporter doesn't rely on
+			// normal FBX hierarchical scale propagation. If the figure's scale were
+			// ALSO written to the root's LclScaling, any standards-compliant FBX
+			// reader would compose it into every descendant's translation on top of
+			// the manual pre-bake, double-applying it (e.g. a 98.88% figure scale
+			// would shrink the whole skeleton to ~97.77%) - which is exactly the tiny,
+			// uniform, whole-character shrink seen versus the bind pose.
+			FigureScale = Bone->getScaleControl()->getValue(CurrentTime);
+			ControlScale.m_x = Bone->getXScaleControl()->getValue(CurrentTime) * FigureScale;
+			ControlScale.m_y = Bone->getYScaleControl()->getValue(CurrentTime) * FigureScale;
+			ControlScale.m_z = Bone->getZScaleControl()->getValue(CurrentTime) * FigureScale;
+		}
 
-		// Get the rotation and position relative to the parent
-		if (DzNode* ParentBone = Bone->getNodeParent())
+		// Get the rotation and position relative to the parent. This must be the
+		// bone's *export* parent (whatever generateSkeleton actually attached it
+		// under), not always Bone->getNodeParent() - for a bone grafted in from a
+		// conforming child figure (see generateSkeleton's "Add child figure bones"),
+		// those two differ, and using the true Daz parent here computes a position
+		// relative to the wrong reference frame even though it looks approximately
+		// right (the conforming figure's own origin sits close to its fit target).
+		if (DzNode* ParentBone = ExportParentMap.value(Bone, Bone->getNodeParent()))
 		{
 
 			// Get the local orientation
@@ -481,9 +510,58 @@ void DthFbxExporter::exportNodeAnimation(DzNode* Bone, QMap<DzNode*, FbxNode*>& 
 			DzVec3 OrientedRelativeDefaultPosition = ParentBone->getOrientation(true).inverse().multVec(RelativeDefaultPosition);
 
 			DzVec3 RelativeMovement = Position - ParentPosition;
-			if (ParentBone->isRootNode())
+
+			// A bone whose parent is a Figure node is the root bone of that figure -
+			// either the primary figure, or a conforming/follower figure (e.g. mouth,
+			// eyelashes) fitted to it. isRootNode() alone only catches the primary
+			// figure, since a conforming figure's node is itself parented to whatever
+			// it follows. Without the DzFigure check here, every bone belonging to a
+			// child figure fell through to the "else" branch below and never received
+			// any scale compensation at all, so child figures silently drifted out of
+			// alignment whenever the figure they follow was scaled.
+			if (ParentBone->isRootNode() || qobject_cast<DzFigure*>(ParentBone) != nullptr)
 			{
-				Position = (Position + OrientedRelativeDefaultPosition) * FigureScale;
+				// A conforming/follower figure's own Scale control stays at its
+				// untouched default (usually 1.0) even while it visually inherits the
+				// scale of whatever figure it follows, so walk the follow-target chain
+				// up to whichever figure actually governs the scale. getWSScale() would
+				// also pick up the inherited scale, but as a decomposed world-space
+				// matrix it carries tiny floating-point error even at an exact 1.0 -
+				// enough to make frame 0 visibly drift from the bind pose. Reading the
+				// governing figure's own Scale/XScale/YScale/ZScale controls directly
+				// keeps this exact, matching how ControlScale is computed above.
+				DzNode* EffectiveScaleNode = ParentBone;
+				if (DzSkeleton* ParentSkeleton = qobject_cast<DzSkeleton*>(ParentBone))
+				{
+					while (DzSkeleton* FollowTarget = ParentSkeleton->getFollowTarget())
+					{
+						ParentSkeleton = FollowTarget;
+					}
+					EffectiveScaleNode = ParentSkeleton;
+				}
+
+				float EffectiveScale = EffectiveScaleNode->getScaleControl()->getValue(CurrentTime);
+				DzVec3 EffectiveParentScale;
+				EffectiveParentScale.m_x = EffectiveScaleNode->getXScaleControl()->getValue(CurrentTime) * EffectiveScale;
+				EffectiveParentScale.m_y = EffectiveScaleNode->getYScaleControl()->getValue(CurrentTime) * EffectiveScale;
+				EffectiveParentScale.m_z = EffectiveScaleNode->getZScaleControl()->getValue(CurrentTime) * EffectiveScale;
+
+				DzVec3 UnscaledPosition = Position + OrientedRelativeDefaultPosition;
+				Position.m_x = UnscaledPosition.m_x * EffectiveParentScale.m_x;
+				Position.m_y = UnscaledPosition.m_y * EffectiveParentScale.m_y;
+				Position.m_z = UnscaledPosition.m_z * EffectiveParentScale.m_z;
+
+				// This bone is the single point where the figure's scale enters the
+				// exported hierarchy, so also fold it into this bone's own LclScaling
+				// (on top of its own individual scale control, already in ControlScale).
+				// Every bone further down the chain keeps using its raw, unscaled bind
+				// offset (see the "else" below) and relies on normal FBX hierarchical
+				// composition to inherit this scale from here - without this, children
+				// of this bone never received the figure's scale at all and ended up
+				// proportionally too large versus the bind pose.
+				ControlScale.m_x *= EffectiveParentScale.m_x;
+				ControlScale.m_y *= EffectiveParentScale.m_y;
+				ControlScale.m_z *= EffectiveParentScale.m_z;
 			}
 			else
 			{

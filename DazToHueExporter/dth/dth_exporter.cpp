@@ -30,7 +30,6 @@ DthExporter::~DthExporter()
 
 void DthExporter::doExport(QString exportDirectory, QString characterName, QString referenceFrames, bool saveSettings)
 {
-
 	selectedRootNode_ = dzScene->getPrimarySelection();
 
 	if (!readyToExport(exportDirectory, characterName, "", referenceFrames))
@@ -69,10 +68,10 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 	// Export alembic ROM
 	dazHelpers.enableInteractiveUpdates();
 	alembicExporter.doRomExport();
+	dazHelpers.disableInteractiveUpdates();
 	exportProgress.step();
 
 	// Export fbx ROM files
-	dazHelpers.disableInteractiveUpdates();
 	fbxExporter.exportRoms();
 	exportProgress.step();
 	fbxExporter.exportExperimentalRomAnimation();
@@ -176,7 +175,6 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 	{
 		this->saveSettings(exportDirectory, characterName);
 	}
-
 }
 
 bool DthExporter::readyToExport(QString exportDirectory, QString characterName, QString animationName, QString referenceFrames, bool exportingAnimationOnly)
@@ -216,12 +214,10 @@ bool DthExporter::readyToExport(QString exportDirectory, QString characterName, 
 
 void DthExporter::saveSettings(QString exportDirectory, QString characterName)
 {
-
 	// Save Settings
 	settings_.lastExportPath = exportDirectory;
 	settings_.lastCharacterName = characterName;
 	dthSettings_.saveSettings(settings_);
-
 }
 
 #include "moc_dth_exporter.cpp"
