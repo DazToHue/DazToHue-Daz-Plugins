@@ -54,3 +54,8 @@ while merging and then maintaining the two-generation tree this repo builds.
   the script aborts before compiling anything. The log then ends on a Qt
   warning with no compiler error anywhere in it — that is the tell. To capture
   a build log, redirect stdout only and leave stderr alone.
+- **`cmake --build <dir> --target X --clean-first` cleans the WHOLE build with
+  the Visual Studio generator, not just target X.** (Measured 2026-08-18:
+  `--target dth_tools --clean-first` emptied both plugins' `Release/`
+  folders.) To rebuild one target from scratch, delete its output and build
+  the target *without* `--clean-first` — or accept rebuilding everything.
