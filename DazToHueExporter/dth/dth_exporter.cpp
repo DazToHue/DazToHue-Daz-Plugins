@@ -48,10 +48,25 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 
 	// Initialise logger, helpers and writer
 	DthLogger dthLogger(exportDirectory, characterName, selectedRootNode_);
-	DazHelpers dazHelpers(selectedRootNode_, &dthLogger);
-	DthWriter dthWriter(exportDirectory, characterName, selectedRootNode_, dazHelpers, exportProgress);
 
 	dthLogger.log(LogLevel::DTHINFO, QString("**** doExport triggered ****"));
+
+	// Delete this set's previous output before anything opens a file: a
+	// pre-existing set must have zero influence on the export content
+	// (dth-character-studio measured 2.0.2 rewriting one as a static ROM and
+	// still deletes the set itself before every doExport - 2.1.1 owns that
+	// guarantee, so the workaround can retire on >= 2.1.1). This runs before
+	// DthWriter's constructor takes the .dth file handle.
+	QStringList staleRemovalFailures;
+	const int staleRemoved = DthStaticHelpers::removeStaleRomExportSet(exportDirectory, characterName, &staleRemovalFailures);
+	if (staleRemoved > 0) dthLogger.log(LogLevel::DTHINFO, QString("Removed %1 stale output file(s) from a previous export").arg(staleRemoved));
+	for (const QString& failedPath : staleRemovalFailures)
+	{
+		dthLogger.log(LogLevel::DTHWARNGING, QString("Could not remove stale output file %1 - it may be locked by another application").arg(failedPath));
+	}
+
+	DazHelpers dazHelpers(selectedRootNode_, &dthLogger);
+	DthWriter dthWriter(exportDirectory, characterName, selectedRootNode_, dazHelpers, exportProgress);
 
 	// Initialise exporters
 	dthLogger.log(LogLevel::DTHINFO, QString("Initialising FBX exporter"));
@@ -114,6 +129,10 @@ void DthExporter::doExportAnimation(QString exportDirectory, QString characterNa
 	// Create the export directory if it doesn't exist
 	DthStaticHelpers::createDirectory(exportDirectory);
 
+	// Same zero-influence guarantee as doExport: a leftover animation FBX
+	// must not survive into (or shape) this run's output.
+	DthStaticHelpers::removeStaleAnimationExport(exportDirectory, characterName, animationName);
+
 	// Initialise progress display
 	DzProgress exportProgress = DzProgress("", 6, false, true);
 	exportProgress.setCloseOnFinish(false);
@@ -148,6 +167,10 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 
 	// Create the export directory if it doesn't exist
 	DthStaticHelpers::createDirectory(exportDirectory);
+
+	// Same zero-influence guarantee as doExport, for this entry point's own
+	// output file.
+	DthStaticHelpers::removeStaleGroomExport(exportDirectory, characterName);
 
 	// Initialise progress display
 	DzProgress exportProgress = DzProgress("", 4, false, true);
