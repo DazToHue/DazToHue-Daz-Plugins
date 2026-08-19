@@ -145,6 +145,8 @@ void DthFbxExporter::exportSubdividedFbx()
 
 void DthFbxExporter::exportReferenceSkeleton(int frame)
 {
+	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, "Exporting reference frame " + QString::number(frame));
+
 	exportProgress_.setCurrentInfo("Exporting reference frame " + QString::number(frame));
 
 	// Initialise Daz exporter
@@ -178,6 +180,8 @@ void DthFbxExporter::exportReferenceSkeleton(int frame)
 
 void DthFbxExporter::exportExperimentalRomAnimation()
 {
+	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, "Exporting experimental ROM animation");
+
 	characterExperimentalRomExportPath_ = exportDirectory_ + "/" + characterName_ + "_experimental_rom.fbx";
 
 	DzSkeleton* skeleton = selectedRootNode_->getSkeleton();
@@ -232,11 +236,15 @@ void DthFbxExporter::exportExperimentalRomAnimation()
 	exporter->Export(scene);
 	exporter->Destroy();
 
+	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, "Finished exporting experimental ROM animation");
+
 	if (dthWriter_ != nullptr) dthWriter_->setExperimentalRomPath(characterExperimentalRomExportPath_);
 }
 
 void DthFbxExporter::exportAnimationOnly(QString animationName)
 {
+	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, "Exporting " + animationName + " animation");
+
 	exportProgress_.setCurrentInfo("Exporting " + animationName + " animation");
 
 	DzExportMgr* exportManager = dzApp->getExportMgr();

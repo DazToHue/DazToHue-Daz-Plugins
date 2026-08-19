@@ -8,6 +8,7 @@
 
 #include <QtCore/qdir.h>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 
 #include <dznode.h>
 
@@ -136,6 +137,51 @@ namespace DthStaticHelpers
 			return true;
 		}
 
+	}
+
+	// Daz Studio bakes some maps (LIE-merged skin materials, decal composites,
+	// morph-driven displacement, etc.) straight into its own temp folder
+	// instead of the content library - App.getTempPath() in the Daz Studio 4
+	// reference guide (dzApp->getTempPath() here). Those files are transient:
+	// Daz Studio is free to clear them on the next launch, so a .dth manifest
+	// that still points there goes stale. Anything discovered under that temp
+	// folder is copied into the export's own Textures folder and the caller
+	// is given the copy's path to record instead. Paths outside the temp
+	// folder (the normal content-library case) are returned unchanged.
+	QString relocateTempTexture(const QString& texturePath, const QString& exportDirectory)
+	{
+		if (texturePath.isEmpty()) return texturePath;
+
+		QString tempPath = QDir::fromNativeSeparators(dzApp->getTempPath());
+		if (tempPath.isEmpty()) return texturePath;
+		if (!tempPath.endsWith("/")) tempPath += "/";
+
+		const QString normalizedTexturePath = QDir::fromNativeSeparators(texturePath);
+		if (!normalizedTexturePath.startsWith(tempPath, Qt::CaseInsensitive)) return texturePath;
+
+		const QString textureDirectory = exportDirectory + "/Textures";
+		if (!createDirectory(textureDirectory))
+		{
+			dzApp->warning(QString("DazToHue: could not create texture folder %1").arg(textureDirectory));
+			return texturePath;
+		}
+
+		const QString destinationPath = textureDirectory + "/" + QFileInfo(texturePath).fileName();
+
+		// A copy left over from a previous export must not block this one -
+		// same reasoning as removeStaleRomExportSet() for the other outputs.
+		if (QFile::exists(destinationPath))
+		{
+			QFile::remove(destinationPath);
+		}
+
+		if (!QFile::copy(texturePath, destinationPath))
+		{
+			dzApp->warning(QString("DazToHue: could not copy temp texture '%1' to '%2'").arg(texturePath, destinationPath));
+			return texturePath;
+		}
+
+		return destinationPath;
 	}
 
 	namespace

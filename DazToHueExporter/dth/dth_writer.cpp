@@ -217,6 +217,8 @@ void DthWriter::writeMaterialProperty(DzNode* node, DzMaterial* material, DzProp
 
 void DthWriter::writePropertyTexture(QString name, QString label, double value, QString type, QString texture)
 {
+	texture = resolveTexturePath(texture);
+
 	dthWriter_->startObject(true);
 	dthWriter_->addMember("Name", name);
 	dthWriter_->addMember("Label", label);
@@ -236,6 +238,8 @@ void DthWriter::writePropertyTexture(QString name, QString label, double value, 
 
 void DthWriter::writePropertyTexture(QString name, QString label, QString value, QString type, QString texture)
 {
+	texture = resolveTexturePath(texture);
+
 	dthWriter_->startObject(true);
 	dthWriter_->addMember("Name", name);
 	dthWriter_->addMember("Label", label);
@@ -251,6 +255,20 @@ void DthWriter::writePropertyTexture(QString name, QString label, QString value,
 			discoveredTextures_.append(texture);
 		}
 	}
+}
+
+QString DthWriter::resolveTexturePath(const QString& texture)
+{
+	if (texture.isEmpty())
+		return texture;
+
+	auto cached = relocatedTexturePaths_.constFind(texture);
+	if (cached != relocatedTexturePaths_.constEnd())
+		return cached.value();
+
+	QString resolved = DthStaticHelpers::relocateTempTexture(texture, exportDirectory_);
+	relocatedTexturePaths_.insert(texture, resolved);
+	return resolved;
 }
 
 void DthWriter::writeDiscoveredTextures()

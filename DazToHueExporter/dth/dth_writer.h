@@ -28,6 +28,7 @@ public:
 	void writeMaterialProperty(DzNode* Node, DzMaterial* Material, DzProperty* Property);
 	void writePropertyTexture(QString sName, QString sLabel, double dValue, QString sType, QString sTexture);
 	void writePropertyTexture(QString sName, QString sLabel, QString sValue, QString sType, QString sTexture);
+	QString resolveTexturePath(const QString& texture);
 	void writeDiscoveredTextures();
 	void writeAllSubdivisions();
 	void writeSubdivisionProperties(const QString& Name, int targetValue);
@@ -55,6 +56,7 @@ private:
 	QString alembicRomPath_ = "";
 	QString experimentalRomPath_ = "";
 	QStringList discoveredTextures_;
+	QMap<QString, QString> relocatedTexturePaths_;
 	QStringList fbxGeoshells_;
 	QStringList alembicGeoshells_;
 	QStringList alembicGeografts_;
