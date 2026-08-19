@@ -46,7 +46,7 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 	DzProgress exportProgress = DzProgress("", 7 + referenceFrameCount, false, true);
 	exportProgress.setCloseOnFinish(false);
 
-	// Initialise logger, helpers and writer
+	// Initialise logger
 	DthLogger dthLogger(exportDirectory, characterName, selectedRootNode_);
 
 	dthLogger.log(LogLevel::DTHINFO, QString("**** doExport triggered ****"));
@@ -65,6 +65,7 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 		dthLogger.log(LogLevel::DTHWARNGING, QString("Could not remove stale output file %1 - it may be locked by another application").arg(failedPath));
 	}
 
+	// Initialise helpers and writer
 	DazHelpers dazHelpers(selectedRootNode_, &dthLogger);
 	DthWriter dthWriter(exportDirectory, characterName, selectedRootNode_, dazHelpers, exportProgress);
 
@@ -129,6 +130,11 @@ void DthExporter::doExportAnimation(QString exportDirectory, QString characterNa
 	// Create the export directory if it doesn't exist
 	DthStaticHelpers::createDirectory(exportDirectory);
 
+	// Initialise logger
+	DthLogger dthLogger(exportDirectory, characterName, selectedRootNode_);
+
+	dthLogger.log(LogLevel::DTHINFO, QString("**** doExportAnimation triggered ****"));
+
 	// Same zero-influence guarantee as doExport: a leftover animation FBX
 	// must not survive into (or shape) this run's output.
 	DthStaticHelpers::removeStaleAnimationExport(exportDirectory, characterName, animationName);
@@ -141,7 +147,7 @@ void DthExporter::doExportAnimation(QString exportDirectory, QString characterNa
 	DazHelpers dazTools(selectedRootNode_, nullptr);
 
 	// Initialise exporters
-	DthFbxExporter fbxExporter(exportDirectory, characterName, selectedRootNode_, dazTools, nullptr, exportProgress, nullptr);
+	DthFbxExporter fbxExporter(exportDirectory, characterName, selectedRootNode_, dazTools, nullptr, exportProgress, &dthLogger);
 
 	// Export fbx animation
 	fbxExporter.exportAnimationOnly(animationName);
@@ -154,6 +160,8 @@ void DthExporter::doExportAnimation(QString exportDirectory, QString characterNa
 	{
 		this->saveSettings(exportDirectory, characterName);
 	}
+
+	dthLogger.log(LogLevel::DTHINFO, QString("**** doExportAnimation finished ****"));
 }
 
 void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString characterName, bool saveSettings)
@@ -168,6 +176,11 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 	// Create the export directory if it doesn't exist
 	DthStaticHelpers::createDirectory(exportDirectory);
 
+	// Initialise logger
+	DthLogger dthLogger(exportDirectory, characterName, selectedRootNode_);
+
+	dthLogger.log(LogLevel::DTHINFO, QString("**** doExportAlembicGroomPoses triggered ****"));
+
 	// Same zero-influence guarantee as doExport, for this entry point's own
 	// output file.
 	DthStaticHelpers::removeStaleGroomExport(exportDirectory, characterName);
@@ -181,7 +194,7 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 
 	// Initialise exporters
 	Sagan::HoudiniAlembicOutputTransformer houdiniAlembicOutputTransformer;
-	DthAlembicExporter alembicExporter(exportDirectory, characterName, selectedRootNode_, dazHelpers, nullptr, exportProgress, &houdiniAlembicOutputTransformer, nullptr);
+	DthAlembicExporter alembicExporter(exportDirectory, characterName, selectedRootNode_, dazHelpers, nullptr, exportProgress, &houdiniAlembicOutputTransformer, &dthLogger);
 
 	// Pre-process scene
 	dazHelpers.preprocessScene();
@@ -191,6 +204,11 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 	alembicExporter.doGroomPosesExport();
 
 	exportProgress.step();
+
+	dazHelpers.undoChanges();
+	dazHelpers.reparentHiddenNodes();
+	dazHelpers.unlockSubdivisionLevels();
+
 	exportProgress.finish();
 
 	// Save Settings
@@ -198,6 +216,8 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 	{
 		this->saveSettings(exportDirectory, characterName);
 	}
+
+	dthLogger.log(LogLevel::DTHINFO, QString("**** doExportAlembicGroomPoses finished ****"));
 }
 
 bool DthExporter::readyToExport(QString exportDirectory, QString characterName, QString animationName, QString referenceFrames, bool exportingAnimationOnly)
