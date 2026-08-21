@@ -243,17 +243,17 @@ namespace DthStaticHelpers
 		return removed;
 	}
 
-	int removeStaleAnimationExport(const QString& exportDirectory, const QString& characterName, const QString& animationName)
+	int removeStaleAnimationExport(const QString& exportDirectory, const QString& characterName, const QString& animationName, QStringList* failedRemovals)
 	{
 		int removed = 0;
-		removeStaleFile(exportDirectory + "/" + characterName + "_" + animationName + "_animation.fbx", removed, nullptr);
+		removeStaleFile(exportDirectory + "/" + characterName + "_" + animationName + "_animation.fbx", removed, failedRemovals);
 		return removed;
 	}
 
-	int removeStaleGroomExport(const QString& exportDirectory, const QString& characterName)
+	int removeStaleGroomExport(const QString& exportDirectory, const QString& characterName, QStringList* failedRemovals)
 	{
 		int removed = 0;
-		removeStaleFile(exportDirectory + "/" + characterName + "_grooms.abc", removed, nullptr);
+		removeStaleFile(exportDirectory + "/" + characterName + "_grooms.abc", removed, failedRemovals);
 		return removed;
 	}
 }

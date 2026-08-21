@@ -18,7 +18,7 @@ namespace DthStaticHelpers
 	bool createDirectory(const QString& filePath);
 	QString relocateTempTexture(const QString& texturePath, const QString& exportDirectory);
 	int removeStaleRomExportSet(const QString& exportDirectory, const QString& characterName, QStringList* failedRemovals = nullptr);
-	int removeStaleAnimationExport(const QString& exportDirectory, const QString& characterName, const QString& animationName);
-	int removeStaleGroomExport(const QString& exportDirectory, const QString& characterName);
+	int removeStaleAnimationExport(const QString& exportDirectory, const QString& characterName, const QString& animationName, QStringList* failedRemovals = nullptr);
+	int removeStaleGroomExport(const QString& exportDirectory, const QString& characterName, QStringList* failedRemovals = nullptr);
 
 }

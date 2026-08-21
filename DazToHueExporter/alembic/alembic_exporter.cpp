@@ -36,12 +36,6 @@ void DthAlembicExporter::doRomExport()
 		throw std::runtime_error("Could not create alembic archive. Make sure the Alembic file is not locked by another application such as Houdini.");
 	}
 
-	// Decode nodes
-	Sagan::AlembicNodeDecoder alembicNodeDecoder(this, dazHelpers_, dthWriter_);
-	alembicNodeDecoder.setShapeNameFormatter(DthStaticHelpers::getFormattedShapeNameAsString);
-	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Decoding nodes"));
-	alembicNodeDecoder.decodeSelected(selectedRootNode_);
-
 	int startFrame = dzScene->getPlayRange().getStart() / dzScene->getTimeStep();
 	int endFrame = dzScene->getPlayRange().getEnd() / dzScene->getTimeStep();
 
@@ -49,25 +43,63 @@ void DthAlembicExporter::doRomExport()
 	DzProgress alembicProgress = DzProgress("", endFrame, false, true);
 	alembicProgress.setCloseOnFinish(false);
 
-	// Export frames
-	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames"));
+	int currentFrame = startFrame;
 
-	for (int currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
+	// Decoding and the frame loop are contained for the same reason the
+	// archive creation above is: whatever throws in here - Alembic, Ogawa, a
+	// bad_alloc - must not unwind past the plugin. A mid-loop death was
+	// measured (2026-08-20) that reached "Exporting alembic frames", wrote 11
+	// MB of an expected 337 MB, and logged NOTHING; the frame markers below
+	// plus this catch are what turn a repeat into a located failure.
+	try
 	{
-		alembicProgress.setCurrentInfo("Exporting alembic frame " + QString::number(currentFrame));
+		// Decode nodes
+		Sagan::AlembicNodeDecoder alembicNodeDecoder(this, dazHelpers_, dthWriter_);
+		alembicNodeDecoder.setShapeNameFormatter(DthStaticHelpers::getFormattedShapeNameAsString);
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Decoding nodes"));
+		alembicNodeDecoder.decodeSelected(selectedRootNode_);
 
-		dzScene->setFrame(currentFrame);
+		// Export frames
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames %1 to %2").arg(startFrame).arg(endFrame));
 
-		QApplication::processEvents();
+		for (currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
+		{
+			alembicProgress.setCurrentInfo("Exporting alembic frame " + QString::number(currentFrame));
 
-		// DS6 defers evaluation past setFrame(); without this every frame reads
-		// a stale mesh (see updateGeometryCaches). The groom-poses loop below
-		// deliberately does NOT do this - forcing an SBH node hangs DS6.
-		alembicNodeDecoder.updateGeometryCaches();
+			// A marker every 10 frames: enough to locate a silent death, few
+			// enough to keep the log readable on a 240-frame ROM.
+			if (dthLogger_ != nullptr && (currentFrame == startFrame || currentFrame % 10 == 0))
+			{
+				dthLogger_->log(LogLevel::DTHINFO, QString("Alembic frame %1").arg(currentFrame));
+			}
 
-		alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+			dzScene->setFrame(currentFrame);
 
-		alembicProgress.step();
+			QApplication::processEvents();
+
+			// DS6 defers evaluation past setFrame(); without this every frame reads
+			// a stale mesh (see updateGeometryCaches). The groom-poses loop below
+			// deliberately does NOT do this - forcing an SBH node hangs DS6.
+			alembicNodeDecoder.updateGeometryCaches();
+
+			alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+
+			alembicProgress.step();
+		}
+	}
+	catch (const std::exception& e)
+	{
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHERROR, QString("Alembic ROM export failed at frame %1 - %2").arg(currentFrame).arg(QString::fromUtf8(e.what())));
+		m_Archive.reset();
+		alembicProgress.finish();
+		throw std::runtime_error(QString("Alembic ROM export failed at frame %1 - %2").arg(currentFrame).arg(QString::fromUtf8(e.what())).toUtf8().constData());
+	}
+	catch (...)
+	{
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHERROR, QString("Alembic ROM export failed at frame %1 with an unrecognised error").arg(currentFrame));
+		m_Archive.reset();
+		alembicProgress.finish();
+		throw std::runtime_error(QString("Alembic ROM export failed at frame %1 with an unrecognised error").arg(currentFrame).toUtf8().constData());
 	}
 
 	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Finished exporting alembic frames"));
@@ -107,12 +139,6 @@ void DthAlembicExporter::doGroomPosesExport()
 		throw std::runtime_error("Could not create alembic archive. Make sure the Alembic file is not locked by another application such as Houdini.");
 	}
 
-	// Decode nodes
-	Sagan::AlembicNodeDecoder alembicNodeDecoder(this, dazHelpers_, dthWriter_);
-	alembicNodeDecoder.setShapeNameFormatter(DthStaticHelpers::getFormattedShapeNameAsString);
-	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Decoding nodes"));
-	alembicNodeDecoder.decodeSelected(selectedRootNode_);
-
 	int startFrame = 0;
 	int endFrame = 1;
 
@@ -120,20 +146,46 @@ void DthAlembicExporter::doGroomPosesExport()
 	DzProgress alembicProgress = DzProgress("", endFrame, false, true);
 	alembicProgress.setCloseOnFinish(false);
 
-	// Export frames
-	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames"));
+	int currentFrame = startFrame;
 
-	for (int currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
+	// Contained for the same reason as doRomExport()'s loop above.
+	try
 	{
-		alembicProgress.setCurrentInfo("Exporting alembic frame " + QString::number(currentFrame));
+		// Decode nodes
+		Sagan::AlembicNodeDecoder alembicNodeDecoder(this, dazHelpers_, dthWriter_);
+		alembicNodeDecoder.setShapeNameFormatter(DthStaticHelpers::getFormattedShapeNameAsString);
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Decoding nodes"));
+		alembicNodeDecoder.decodeSelected(selectedRootNode_);
 
-		dzScene->setFrame(currentFrame);
+		// Export frames
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames"));
 
-		QApplication::processEvents();
+		for (currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
+		{
+			alembicProgress.setCurrentInfo("Exporting alembic frame " + QString::number(currentFrame));
 
-		alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+			dzScene->setFrame(currentFrame);
 
-		alembicProgress.step();
+			QApplication::processEvents();
+
+			alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+
+			alembicProgress.step();
+		}
+	}
+	catch (const std::exception& e)
+	{
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHERROR, QString("Alembic groom pose export failed at frame %1 - %2").arg(currentFrame).arg(QString::fromUtf8(e.what())));
+		m_Archive.reset();
+		alembicProgress.finish();
+		throw std::runtime_error(QString("Alembic groom pose export failed at frame %1 - %2").arg(currentFrame).arg(QString::fromUtf8(e.what())).toUtf8().constData());
+	}
+	catch (...)
+	{
+		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHERROR, QString("Alembic groom pose export failed at frame %1 with an unrecognised error").arg(currentFrame));
+		m_Archive.reset();
+		alembicProgress.finish();
+		throw std::runtime_error(QString("Alembic groom pose export failed at frame %1 with an unrecognised error").arg(currentFrame).toUtf8().constData());
 	}
 
 	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Finished exporting alembic frames"));

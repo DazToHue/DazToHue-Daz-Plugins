@@ -1,4 +1,6 @@
 
+#include <stdexcept>
+
 #include <dzprogress.h>
 
 #include "dth_writer.h"
@@ -18,10 +20,7 @@
 
 DthWriter::DthWriter(QString exportDirectory, QString characterName, DzNode* selectedRootNode, DazHelpers& dazTools, DzProgress& exportProgress) : exportDirectory_(exportDirectory), characterName_(characterName), selectedRootNode_(selectedRootNode), dazHelpers_(dazTools), exportProgress_(exportProgress)
 {
-	QString dthFilename = exportDirectory_ + "/" + characterName_ + ".dth";
-	dthFile_ = std::make_unique<QFile>(dthFilename);
-	bool b_fileOpened = dthFile_->open(QIODevice::WriteOnly);
-	dthWriter_ = std::make_unique<DzJsonWriter>(dthFile_.get());
+	dthFilePath_ = exportDirectory_ + "/" + characterName_ + ".dth";
 }
 
 DthWriter::~DthWriter()
@@ -30,6 +29,19 @@ DthWriter::~DthWriter()
 
 void DthWriter::writeFile()
 {
+	// The .dth is created HERE and nowhere earlier. It is the manifest that
+	// says "this export landed", and every consumer - including the calling
+	// scripts' restore path - reads its presence that way. Opening it in the
+	// constructor left a 0-BYTE .dth behind whenever a later leg failed
+	// (measured 2026-08-19..21, alongside a truncated .abc and no FBX), which
+	// reads as a successful export to anything that only checks existence.
+	dthFile_ = std::make_unique<QFile>(dthFilePath_);
+	if (!dthFile_->open(QIODevice::WriteOnly))
+	{
+		throw std::runtime_error(QString("Could not open %1 for writing - it may be locked by another application.").arg(dthFilePath_).toUtf8().constData());
+	}
+	dthWriter_ = std::make_unique<DzJsonWriter>(dthFile_.get());
+
 	dthWriter_->startObject(true);
 	dthWriter_->addMember("DTH Version", QString::fromStdString(PLUGIN_VERSION_STRING));
 	dthWriter_->addMember("Character Name", characterName_);

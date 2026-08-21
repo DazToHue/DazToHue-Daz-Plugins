@@ -47,6 +47,7 @@ private:
 
 	QString exportDirectory_;
 	QString characterName_;
+	QString dthFilePath_;
 	DzNode* selectedRootNode_;
 	DazHelpers& dazHelpers_;
 	DzProgress& exportProgress_;
