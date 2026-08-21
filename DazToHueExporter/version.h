@@ -4,7 +4,7 @@
 
 #define PLUGIN_MAJOR	2
 #define PLUGIN_MINOR	1
-#define PLUGIN_REV		3
+#define PLUGIN_REV		4
 #define PLUGIN_BUILD	0
 
 // Helper macros to force expansion of the numbers before converting to text

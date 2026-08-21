@@ -222,8 +222,14 @@ void Sagan::AlembicNodeDecoder::initObject(DzNode* node, const AlembicObjectPtr&
 	Alembic::Abc::OStringProperty oldSourceProp(arbGeomParams, "source");
 	oldSourceProp.set("dth");
 
-	// Add the node to the list of rom exportable nodes
-	m_exportableNodes.insert(node);
+	// Add the node to the list of rom exportable nodes. The vector keeps
+	// DECODE order (this node, then its children below) because that is the
+	// order the per-frame cache refresh has to run in; the set stays for
+	// membership and for the write pass, where order does not matter.
+	if (m_exportableNodes.insert(node).second)
+	{
+		m_exportableNodesInDecodeOrder.push_back(node);
+	}
 
 	// Decode child nodes
 	decodeChildNodes(node, parent);
@@ -245,12 +251,43 @@ void Sagan::AlembicNodeDecoder::updateGeometryCaches() const
 	// at 0% until the process was killed; without the force the same grooms
 	// exported in ~2s each). The SBH skip below is belt-and-braces for fitted
 	// SBH items that survive into a ROM export unhidden.
-	for (const auto& node : m_exportableNodes)
+	//
+	// ORDER IS LOAD-BEARING, and this walks m_exportableNodesInDecodeOrder
+	// rather than m_exportableNodes for that reason. A fitted follower
+	// evaluates against the figure it follows, so the figure has to be
+	// refreshed FIRST: force a follower while its figure still holds the
+	// previous frame's mesh and the follower fits to that stale body and is
+	// then marked clean, so it never catches up.
+	//
+	// m_exportableNodes is a std::set<DzNode*>, which orders by POINTER
+	// VALUE - i.e. heap layout, which is fixed for a session but varies
+	// between runs and has nothing to do with the scene hierarchy. That made
+	// the ROM bimodal: whichever order a session happened to allocate into,
+	// every frame in that run got it, so the same scene and settings landed
+	// on exactly one of two Alembics - 807,562,019 bytes with the clothing
+	// following the body, or 337,547,579 bytes with it part-frozen (measured
+	// 2026-08-21, DS4, 2.1.3: Short 6 moving frames vs 13, Yoga 8 vs 14,
+	// Holster 6 vs 10, Bags 8 vs 12, while the body itself held 14 vs 16).
+	// Nothing about it reached any log, because nothing about it was a
+	// failure - just an order.
+	for (const auto& node : m_exportableNodesInDecodeOrder)
 	{
 		if (DazStaticHelpers::isStrandBasedHair(node)) continue;
 
 		if (DzObject* object = node->getObject()) object->forceCacheUpdate(node);
 	}
+}
+
+QStringList Sagan::AlembicNodeDecoder::getMotionSummary() const
+{
+	QStringList lines;
+
+	for (const auto& [label, motion] : m_motionByLabel)
+	{
+		lines.append(QString("%1: moved on %2 of %3 frames").arg(label).arg(motion.framesMoved).arg(motion.framesWritten));
+	}
+
+	return lines;
 }
 
 void Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const
@@ -269,10 +306,47 @@ void Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame)
 
 	std::vector<Imath::V3f> alembicVertices;
 
+	// Bounds are accumulated in the transform loop that has to run anyway, so
+	// the motion accounting below costs nothing extra. It answers the one
+	// question the export log could not previously answer - did this mesh
+	// actually move this frame - which is what distinguishes a good ROM from
+	// one whose clothing quietly stopped following the body.
+	std::array<double, 6> bounds{};
+	bool haveBounds = false;
+
 	for (const auto& vertex : vertices)
 	{
 		const auto transformedVertex = saganExporter->getOutputTransformer()->vertex(vertex);
 		alembicVertices.push_back(Imath::V3f(transformedVertex[0], transformedVertex[1], transformedVertex[2]));
+
+		for (int axis = 0; axis < 3; axis++)
+		{
+			const double value = transformedVertex[axis];
+
+			if (!haveBounds)
+			{
+				bounds[axis] = value;
+				bounds[axis + 3] = value;
+			}
+			else
+			{
+				if (value < bounds[axis]) bounds[axis] = value;
+				if (value > bounds[axis + 3]) bounds[axis + 3] = value;
+			}
+		}
+
+		haveBounds = true;
+	}
+
+	{
+		MeshMotion& motion = m_motionByLabel[label];
+
+		motion.framesWritten++;
+
+		if (motion.haveLastBounds && bounds != motion.lastBounds) motion.framesMoved++;
+
+		motion.lastBounds = bounds;
+		motion.haveLastBounds = haveBounds;
 	}
 
 	auto& meshSchema = saganExporter->getAlembicMeshObjects().at(label)->getSchema();
