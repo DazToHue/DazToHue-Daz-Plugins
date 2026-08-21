@@ -72,25 +72,80 @@ void DazToHueExporterAction::executeAction()
 	entryPoint(mw);
 }
 
+/**
+	The script-engine boundary. Every Q_INVOKABLE below runs its export
+	through here, and NO C++ exception may cross back out of it.
+
+	Measured on DS4: six occurrences in this machine's log.txt between
+	2026-08-18 and 2026-08-21. When the Alembic leg threw - a locked .abc, so
+	`Could not create alembic archive` - the exception unwound through the
+	script engine's invocation frame and killed the engine outright:
+
+		dzscript.cpp(1192): Unhandled error while executing script.
+		QScriptEngine::popContext() doesn't match with pushContext()
+
+	The calling .dsa died at the C++ level, so its own try/catch never ran and
+	neither did its restore path (renaming the .dthprev backups back). Catching
+	here and re-raising as a SCRIPT error is what lets that catch run.
+*/
+void DazToHueExporterAction::runGuardedExport(const QString& entryPointName, const std::function<void()>& exportBody)
+{
+	QString failure;
+
+	try
+	{
+		exportBody();
+		return;
+	}
+	catch (const std::exception& e)
+	{
+		failure = QString::fromUtf8(e.what());
+	}
+	catch (...)
+	{
+		failure = "an unrecognised error";
+	}
+
+	// Note: a C++ catch does not contain a hard fault (an access violation
+	// under /EHsc is not a C++ exception), so a failure that leaves NO trace
+	// here is still possible - the exporter's own per-frame logging is what
+	// locates that case.
+	const QString message = QString("DazToHue Exporter: %1 failed - %2").arg(entryPointName).arg(failure);
+	dzApp->log(message);
+
+	if (!DthCompat::raiseScriptError(this, message))
+	{
+		// Nothing scripted is listening. Say so, rather than let a silent
+		// return read as a successful export.
+		dzApp->log(QString("DazToHue Exporter: the failure above could not be raised to a caller - check the export log and the absence of a .dth file"));
+	}
+}
+
 void DazToHueExporterAction::doExport(QString exportDirectory, QString characterName, QString referenceFrames, bool saveSettings)
 {
-	DthExporter dthExporter = DthExporter();
-	dthExporter.doExport(exportDirectory, characterName, referenceFrames, saveSettings);
-
+	runGuardedExport("doExport", [&]()
+	{
+		DthExporter dthExporter = DthExporter();
+		dthExporter.doExport(exportDirectory, characterName, referenceFrames, saveSettings);
+	});
 }
 
 void DazToHueExporterAction::doExportAnimation(QString exportDirectory, QString characterName, QString animationName, bool saveSettings)
 {
-	DthExporter dthExporter = DthExporter();
-	dthExporter.doExportAnimation(exportDirectory, characterName, animationName, saveSettings);
-
+	runGuardedExport("doExportAnimation", [&]()
+	{
+		DthExporter dthExporter = DthExporter();
+		dthExporter.doExportAnimation(exportDirectory, characterName, animationName, saveSettings);
+	});
 }
 
 void DazToHueExporterAction::doExportAlembicGroomPoses(QString exportDirectory, QString characterName, bool saveSettings)
 {
-	DthExporter dthExporter = DthExporter();
-	dthExporter.doExportAlembicGroomPoses(exportDirectory, characterName, saveSettings);
-
+	runGuardedExport("doExportAlembicGroomPoses", [&]()
+	{
+		DthExporter dthExporter = DthExporter();
+		dthExporter.doExportAlembicGroomPoses(exportDirectory, characterName, saveSettings);
+	});
 }
 
 #include "moc_dth_exporter_action.cpp"

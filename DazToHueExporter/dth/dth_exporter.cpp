@@ -19,6 +19,50 @@
 #include "alembic/sagan/output_transformer/houdini_alembic_output_transformer.h"
 #include "alembic/alembic_exporter.h"
 
+namespace
+{
+	/**
+		Undo everything preprocessScene() did to the user's scene.
+
+		This runs on the FAILURE path as well as the success path: preparation
+		unparents hidden nodes and locks SubD properties, and an export that
+		threw halfway through would otherwise hand the scene back mangled.
+		Never throws - it is called from catch blocks.
+	*/
+	void restoreSceneState(DazHelpers& dazHelpers, DthLogger& dthLogger)
+	{
+		try
+		{
+			dazHelpers.undoChanges();
+			dazHelpers.reparentHiddenNodes();
+			dazHelpers.unlockSubdivisionLevels();
+		}
+		catch (...)
+		{
+			dthLogger.log(LogLevel::DTHERROR, QString("Could not fully restore the scene after a failed export - undo manually before exporting again"));
+		}
+	}
+
+	/**
+		Abort before anything is touched if the export cannot possibly land.
+
+		A stale output file that could not be removed is held open by another
+		application (a Houdini session on the previous .abc is the measured
+		cause), and every writer that follows would fail on it anyway - the
+		Alembic archive first. Failing here means no scene mutation, no file
+		handle, and no half-written corpse to clean up.
+	*/
+	void abortIfOutputLocked(const QStringList& lockedPaths, DthLogger& dthLogger)
+	{
+		if (lockedPaths.isEmpty()) return;
+
+		const QString message = QString("Cannot export - %1 is locked by another application (a Houdini session holding the previous export open is the usual cause). Close it and export again.").arg(lockedPaths.join(", "));
+		dthLogger.log(LogLevel::DTHERROR, message);
+
+		throw std::runtime_error(message.toUtf8().constData());
+	}
+}
+
 DthExporter::DthExporter()
 {
 	settings_ = dthSettings_.getSettings();
@@ -64,6 +108,7 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 	{
 		dthLogger.log(LogLevel::DTHWARNGING, QString("Could not remove stale output file %1 - it may be locked by another application").arg(failedPath));
 	}
+	abortIfOutputLocked(staleRemovalFailures, dthLogger);
 
 	// Initialise helpers and writer
 	DazHelpers dazHelpers(selectedRootNode_, &dthLogger);
@@ -76,36 +121,52 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 	dthLogger.log(LogLevel::DTHINFO, QString("Initialising Alembic exporter"));
 	DthAlembicExporter alembicExporter(exportDirectory, characterName, selectedRootNode_, dazHelpers, &dthWriter, exportProgress, &houdiniAlembicOutputTransformer, &dthLogger);
 
-	// Pre-process scene
-	exportProgress.setCurrentInfo("Preprocessing scene");
-	dazHelpers.preprocessScene();
-	exportProgress.step();
+	try
+	{
+		// Pre-process scene
+		exportProgress.setCurrentInfo("Preprocessing scene");
+		dazHelpers.preprocessScene();
+		exportProgress.step();
 
-	// Export alembic ROM
-	dazHelpers.enableInteractiveUpdates();
-	alembicExporter.doRomExport();
-	dazHelpers.disableInteractiveUpdates();
-	exportProgress.step();
+		// Export alembic ROM
+		dazHelpers.enableInteractiveUpdates();
+		alembicExporter.doRomExport();
+		dazHelpers.disableInteractiveUpdates();
+		exportProgress.step();
 
-	// Export fbx ROM files
-	fbxExporter.exportRoms();
-	exportProgress.step();
-	fbxExporter.exportExperimentalRomAnimation();
-	exportProgress.step();
+		// Export fbx ROM files
+		fbxExporter.exportRoms();
+		exportProgress.step();
+		fbxExporter.exportExperimentalRomAnimation();
+		exportProgress.step();
 
-	// Export reference frames
-	fbxExporter.exportSkeletonReferenceFrames(referenceFrames);
-	exportProgress.step();
+		// Export reference frames
+		fbxExporter.exportSkeletonReferenceFrames(referenceFrames);
+		exportProgress.step();
 
-	// Write DTH file
-	dthLogger.log(LogLevel::DTHINFO, QString("Writing DTH file"));
-	exportProgress.setCurrentInfo("Writing DTH file");
-	dthWriter.writeFile();
-	exportProgress.step();
+		// Write DTH file LAST: it is the manifest that says the export landed,
+		// and it is only created once everything it points at exists.
+		dthLogger.log(LogLevel::DTHINFO, QString("Writing DTH file"));
+		exportProgress.setCurrentInfo("Writing DTH file");
+		dthWriter.writeFile();
+		exportProgress.step();
+	}
+	catch (const std::exception& e)
+	{
+		dthLogger.log(LogLevel::DTHERROR, QString("doExport failed - %1").arg(QString::fromUtf8(e.what())));
+		restoreSceneState(dazHelpers, dthLogger);
+		exportProgress.finish();
+		throw;
+	}
+	catch (...)
+	{
+		dthLogger.log(LogLevel::DTHERROR, QString("doExport failed with an unrecognised error"));
+		restoreSceneState(dazHelpers, dthLogger);
+		exportProgress.finish();
+		throw std::runtime_error("doExport failed with an unrecognised error");
+	}
 
-	dazHelpers.undoChanges();
-	dazHelpers.reparentHiddenNodes();
-	dazHelpers.unlockSubdivisionLevels();
+	restoreSceneState(dazHelpers, dthLogger);
 
 	exportProgress.finish();
 
@@ -136,8 +197,11 @@ void DthExporter::doExportAnimation(QString exportDirectory, QString characterNa
 	dthLogger.log(LogLevel::DTHINFO, QString("**** doExportAnimation triggered ****"));
 
 	// Same zero-influence guarantee as doExport: a leftover animation FBX
-	// must not survive into (or shape) this run's output.
-	DthStaticHelpers::removeStaleAnimationExport(exportDirectory, characterName, animationName);
+	// must not survive into (or shape) this run's output - and a locked one
+	// means this run cannot land, so stop before anything else is touched.
+	QStringList staleRemovalFailures;
+	DthStaticHelpers::removeStaleAnimationExport(exportDirectory, characterName, animationName, &staleRemovalFailures);
+	abortIfOutputLocked(staleRemovalFailures, dthLogger);
 
 	// Initialise progress display
 	DzProgress exportProgress = DzProgress("", 6, false, true);
@@ -149,9 +213,26 @@ void DthExporter::doExportAnimation(QString exportDirectory, QString characterNa
 	// Initialise exporters
 	DthFbxExporter fbxExporter(exportDirectory, characterName, selectedRootNode_, dazTools, nullptr, exportProgress, &dthLogger);
 
-	// Export fbx animation
-	fbxExporter.exportAnimationOnly(animationName);
-	exportProgress.step();
+	// Export fbx animation. Nothing here preprocesses the scene, so there is
+	// no restore counterpart to run - but the failure still belongs in this
+	// export's own log, next to the run that produced it.
+	try
+	{
+		fbxExporter.exportAnimationOnly(animationName);
+		exportProgress.step();
+	}
+	catch (const std::exception& e)
+	{
+		dthLogger.log(LogLevel::DTHERROR, QString("doExportAnimation failed - %1").arg(QString::fromUtf8(e.what())));
+		exportProgress.finish();
+		throw;
+	}
+	catch (...)
+	{
+		dthLogger.log(LogLevel::DTHERROR, QString("doExportAnimation failed with an unrecognised error"));
+		exportProgress.finish();
+		throw std::runtime_error("doExportAnimation failed with an unrecognised error");
+	}
 
 	exportProgress.finish();
 
@@ -182,8 +263,10 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 	dthLogger.log(LogLevel::DTHINFO, QString("**** doExportAlembicGroomPoses triggered ****"));
 
 	// Same zero-influence guarantee as doExport, for this entry point's own
-	// output file.
-	DthStaticHelpers::removeStaleGroomExport(exportDirectory, characterName);
+	// output file - and the same abort-before-touching-anything if it is locked.
+	QStringList staleRemovalFailures;
+	DthStaticHelpers::removeStaleGroomExport(exportDirectory, characterName, &staleRemovalFailures);
+	abortIfOutputLocked(staleRemovalFailures, dthLogger);
 
 	// Initialise progress display
 	DzProgress exportProgress = DzProgress("", 4, false, true);
@@ -196,18 +279,33 @@ void DthExporter::doExportAlembicGroomPoses(QString exportDirectory, QString cha
 	Sagan::HoudiniAlembicOutputTransformer houdiniAlembicOutputTransformer;
 	DthAlembicExporter alembicExporter(exportDirectory, characterName, selectedRootNode_, dazHelpers, nullptr, exportProgress, &houdiniAlembicOutputTransformer, &dthLogger);
 
-	// Pre-process scene
-	dazHelpers.preprocessScene();
-	exportProgress.step();
+	try
+	{
+		// Pre-process scene
+		dazHelpers.preprocessScene();
+		exportProgress.step();
 
-	// Export alembic groom poses
-	alembicExporter.doGroomPosesExport();
+		// Export alembic groom poses
+		alembicExporter.doGroomPosesExport();
 
-	exportProgress.step();
+		exportProgress.step();
+	}
+	catch (const std::exception& e)
+	{
+		dthLogger.log(LogLevel::DTHERROR, QString("doExportAlembicGroomPoses failed - %1").arg(QString::fromUtf8(e.what())));
+		restoreSceneState(dazHelpers, dthLogger);
+		exportProgress.finish();
+		throw;
+	}
+	catch (...)
+	{
+		dthLogger.log(LogLevel::DTHERROR, QString("doExportAlembicGroomPoses failed with an unrecognised error"));
+		restoreSceneState(dazHelpers, dthLogger);
+		exportProgress.finish();
+		throw std::runtime_error("doExportAlembicGroomPoses failed with an unrecognised error");
+	}
 
-	dazHelpers.undoChanges();
-	dazHelpers.reparentHiddenNodes();
-	dazHelpers.unlockSubdivisionLevels();
+	restoreSceneState(dazHelpers, dthLogger);
 
 	exportProgress.finish();
 
