@@ -1,6 +1,8 @@
 #include <unordered_set>
 #include <stdexcept>
 
+#include <QtCore/QStringList>
+
 #include "../daz/daz_helpers.h"
 #include "../dth/dth_static_helpers.h"
 
@@ -44,6 +46,7 @@ void DthAlembicExporter::doRomExport()
 	alembicProgress.setCloseOnFinish(false);
 
 	int currentFrame = startFrame;
+	QStringList motionSummary;
 
 	// Decoding and the frame loop are contained for the same reason the
 	// archive creation above is: whatever throws in here - Alembic, Ogawa, a
@@ -86,6 +89,8 @@ void DthAlembicExporter::doRomExport()
 
 			alembicProgress.step();
 		}
+
+		motionSummary = alembicNodeDecoder.getMotionSummary();
 	}
 	catch (const std::exception& e)
 	{
@@ -103,6 +108,20 @@ void DthAlembicExporter::doRomExport()
 	}
 
 	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Finished exporting alembic frames"));
+
+	// Per-mesh motion, recorded during the bake. A fitted item sitting far
+	// below the others here is the signature of clothing that stopped
+	// following the body - the defect that used to be invisible in every log
+	// this run produces and only showed up as a halved .abc.
+	if (dthLogger_ != nullptr)
+	{
+		dthLogger_->log(LogLevel::DTHINFO, QString("Alembic ROM motion summary"));
+
+		for (const QString& line : motionSummary)
+		{
+			dthLogger_->log(LogLevel::DTHINFO, QString("  %1").arg(line));
+		}
+	}
 
 	m_Archive.reset();
 

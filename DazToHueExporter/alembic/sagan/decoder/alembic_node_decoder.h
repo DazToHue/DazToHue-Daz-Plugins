@@ -36,6 +36,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <variant>
 #include <functional>
+#include <vector>
+#include <map>
+#include <array>
+
+#include <QtCore/QStringList>
 
 #include "../../../daz/daz_static_helpers.h"
 #include "../../../dth/dth_static_helpers.h"
@@ -49,6 +54,21 @@ namespace Sagan
 
 	using AlembicObjectPtr = std::shared_ptr <Alembic::AbcGeom::OObject>;
 	using ExportableNodes = std::set<DzNode*>;
+
+	// Decode order - parents before their children. Distinct from
+	// ExportableNodes on purpose: see m_exportableNodesInDecodeOrder.
+	using ExportableNodeSequence = std::vector<DzNode*>;
+
+	// How many sampled frames a single mesh's bounds actually changed on.
+	// Written during the bake so a ROM that silently froze its clothing is
+	// visible in the export log instead of only under a Houdini probe.
+	struct MeshMotion
+	{
+		std::array<double, 6> lastBounds{};
+		bool haveLastBounds = false;
+		int framesWritten = 0;
+		int framesMoved = 0;
+	};
 	using NodeNameFormatterCallbackType = std::function<std::string(DzNode* node)>;
 
 	class AlembicNodeDecoder
@@ -64,6 +84,9 @@ namespace Sagan
 		void setShapeNameFormatter(NodeNameFormatterCallbackType nodeNameFormatter);
 		std::string getFormattedShapeNameAsString(DzNode* node);
 		ExportableNodes getExportableNodes() const;
+
+		/** One "<mesh>: moved on N of M frames" line per exported mesh. */
+		QStringList getMotionSummary() const;
 
 	private:
 		NodeNameFormatterCallbackType nodeNameFormatter_;
@@ -85,6 +108,15 @@ namespace Sagan
 		std::shared_ptr<Alembic::AbcGeom::OObject> getTopLevelObjectPointer();
 
 		ExportableNodes m_exportableNodes;
+
+		// The SAME nodes, in the order they were decoded: a parent is always
+		// ahead of its children. updateGeometryCaches() walks THIS, never
+		// m_exportableNodes - a std::set<DzNode*> orders by pointer value, so
+		// iterating it forces mesh evaluation in heap-address order. See
+		// updateGeometryCaches() for what that cost us.
+		ExportableNodeSequence m_exportableNodesInDecodeOrder;
+
+		mutable std::map<QString, MeshMotion> m_motionByLabel;
 	};
 
 }
