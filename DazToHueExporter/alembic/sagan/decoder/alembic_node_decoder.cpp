@@ -229,6 +229,18 @@ void Sagan::AlembicNodeDecoder::initObject(DzNode* node, const AlembicObjectPtr&
 	decodeChildNodes(node, parent);
 }
 
+QStringList Sagan::AlembicNodeDecoder::getMotionSummary() const
+{
+	QStringList lines;
+
+	for (const auto& [label, motion] : m_motionByLabel)
+	{
+		lines.append(QString("%1: moved on %2 of %3 frames").arg(label).arg(motion.framesMoved).arg(motion.framesWritten));
+	}
+
+	return lines;
+}
+
 void Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const
 {
 	// The breadcrumb per node, not just per frame: these are DzNode pointers
@@ -257,10 +269,46 @@ void Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame)
 
 	std::vector<Imath::V3f> alembicVertices;
 
+	// Bounds are accumulated in the transform loop that has to run anyway, so
+	// the motion accounting below costs nothing extra: no second pass, and six
+	// doubles plus two counters per mesh. It answers the one question a normal
+	// export log could not - did this mesh actually move this frame.
+	std::array<double, 6> bounds{};
+	bool haveBounds = false;
+
 	for (const auto& vertex : vertices)
 	{
 		const auto transformedVertex = saganExporter->getOutputTransformer()->vertex(vertex);
 		alembicVertices.push_back(Imath::V3f(transformedVertex[0], transformedVertex[1], transformedVertex[2]));
+
+		for (int axis = 0; axis < 3; axis++)
+		{
+			const double value = transformedVertex[axis];
+
+			if (!haveBounds)
+			{
+				bounds[axis] = value;
+				bounds[axis + 3] = value;
+			}
+			else
+			{
+				if (value < bounds[axis]) bounds[axis] = value;
+				if (value > bounds[axis + 3]) bounds[axis + 3] = value;
+			}
+		}
+
+		haveBounds = true;
+	}
+
+	{
+		MeshMotion& motion = m_motionByLabel[label];
+
+		motion.framesWritten++;
+
+		if (motion.haveLastBounds && bounds != motion.lastBounds) motion.framesMoved++;
+
+		motion.lastBounds = bounds;
+		motion.haveLastBounds = haveBounds;
 	}
 
 	auto& meshSchema = saganExporter->getAlembicMeshObjects().at(label)->getSchema();

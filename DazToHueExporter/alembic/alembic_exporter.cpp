@@ -45,6 +45,7 @@ void DthAlembicExporter::doRomExport()
 	alembicProgress.setCloseOnFinish(false);
 
 	int currentFrame = startFrame;
+	QStringList motionSummary;
 
 	// Decoding and the frame loop are contained for the same reason the
 	// archive creation above is: whatever throws in here - Alembic, Ogawa, a
@@ -86,6 +87,8 @@ void DthAlembicExporter::doRomExport()
 
 			alembicProgress.step();
 		}
+
+		motionSummary = alembicNodeDecoder.getMotionSummary();
 	}
 	catch (const std::exception& e)
 	{
@@ -103,6 +106,23 @@ void DthAlembicExporter::doRomExport()
 	}
 
 	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Finished exporting alembic frames"));
+
+	// Per-mesh motion, recorded during the bake. A fitted item sitting far
+	// below the figure here is the signature of clothing that stopped
+	// following the body: measured 2026-08-21, a good ROM and one with
+	// part-frozen clothing produced export logs that were BYTE-IDENTICAL,
+	// 212 lines each - the difference was only visible by probing the .abc in
+	// Houdini. This is that probe's answer, written where the export already
+	// writes.
+	if (dthLogger_ != nullptr)
+	{
+		dthLogger_->log(LogLevel::DTHINFO, QString("Alembic ROM motion summary"));
+
+		for (const QString& line : motionSummary)
+		{
+			dthLogger_->log(LogLevel::DTHINFO, QString("  %1").arg(line));
+		}
+	}
 
 	m_Archive.reset();
 

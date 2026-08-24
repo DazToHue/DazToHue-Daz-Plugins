@@ -36,6 +36,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <variant>
 #include <functional>
+#include <map>
+#include <array>
 
 #include "../../../daz/daz_static_helpers.h"
 #include "../../../dth/dth_static_helpers.h"
@@ -51,6 +53,18 @@ namespace Sagan
 	using ExportableNodes = std::set<DzNode*>;
 	using NodeNameFormatterCallbackType = std::function<std::string(DzNode* node)>;
 
+	// How many frames a single mesh's geometry actually CHANGED on, recorded
+	// as the bake writes it. A fitted item sitting far below the figure here
+	// is a mesh that stopped following the body - the one thing a normal
+	// export log could not say.
+	struct MeshMotion
+	{
+		std::array<double, 6> lastBounds{};
+		bool haveLastBounds = false;
+		int framesWritten = 0;
+		int framesMoved = 0;
+	};
+
 	class AlembicNodeDecoder
 	{
 
@@ -63,6 +77,9 @@ namespace Sagan
 		void setShapeNameFormatter(NodeNameFormatterCallbackType nodeNameFormatter);
 		std::string getFormattedShapeNameAsString(DzNode* node);
 		ExportableNodes getExportableNodes() const;
+
+		/** One "<mesh>: moved on N of M frames" line per exported mesh. */
+		QStringList getMotionSummary() const;
 
 	private:
 		NodeNameFormatterCallbackType nodeNameFormatter_;
@@ -84,6 +101,13 @@ namespace Sagan
 		std::shared_ptr<Alembic::AbcGeom::OObject> getTopLevelObjectPointer();
 
 		ExportableNodes m_exportableNodes;
+
+		// NOTE: m_exportableNodes is a std::set<DzNode*>, so it orders by
+		// POINTER VALUE - heap layout, stable within a session, different
+		// between runs. writeObjects() iterates it, which is why two runs of
+		// one build produce Alembics with identical geometry at different byte
+		// offsets.
+		mutable std::map<QString, MeshMotion> m_motionByLabel;
 	};
 
 }
