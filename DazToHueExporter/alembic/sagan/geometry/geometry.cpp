@@ -163,8 +163,13 @@ Sagan::Vertices Sagan::getOptimizedMeshVertices(const DzNode* node, const Visibl
 	// index read one page past the new buffer - ACCESS_VIOLATION at
 	// getOptimizedMeshVertices+0xd4, intermittent because it races the update.
 	// A stale map means the frame CANNOT be exported correctly (a clamp would
-	// write wrong geometry, silently), so say precisely what disagreed and let
-	// the containment above report it.
+	// write wrong geometry, silently), so fail with the remedy. The measured
+	// cause (twice, both directions shrink): the scene was SAVED with viewport
+	// resolution above Base, the export's own drop to Base re-cooks each
+	// follower asynchronously, and any re-cook landing after decode leaves
+	// this map stale - 8 armed nodes in the measured scene, 4/4 failed runs.
+	// A retry re-rolls that race, so the message must NOT say "try again";
+	// it says what to change so the race cannot happen.
 	const auto liveVertexCount = facetMesh->getNumVertices();
 
 	for (size_t i = 0; i < visible2OriginalVertexIndices.size(); i++)
@@ -174,8 +179,8 @@ Sagan::Vertices Sagan::getOptimizedMeshVertices(const DzNode* node, const Visibl
 
 		if (originalVertexIndex < 0 || originalVertexIndex >= liveVertexCount)
 		{
-			throw std::runtime_error(QString("mesh '%1' changed under the export: decode-time vertex index %2 is outside the live mesh (%3 vertices) - the scene was still cooking; export again")
-				.arg(node->getLabel()).arg(originalVertexIndex).arg(liveVertexCount).toUtf8().constData());
+			throw std::runtime_error(QString("mesh '%1' shrank while the export was reading it (the export prepared %2+ vertices, the live mesh now has %3). This almost always means the scene is saved with viewport resolution above Base: the export switches every mesh to Base and one was still re-cooking. In Daz, set Resolution Level to Base on the figure and its followers (Parameters > Mesh Resolution), save the scene, and export again.")
+				.arg(node->getLabel()).arg(originalVertexIndex + 1).arg(liveVertexCount).toUtf8().constData());
 		}
 
 		const auto v = verticesPtr[originalVertexIndex];
