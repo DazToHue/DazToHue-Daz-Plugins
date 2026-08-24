@@ -39,6 +39,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "dzfigure.h"
 
 #include "../../../version.h"
+#include "../../../dth/dth_fault_probe.h"
 
 Sagan::AlembicNodeDecoder::AlembicNodeDecoder(SaganExporter* saganExporter, DazHelpers& dazHelpers, DthWriter* dthWriter) : saganExporter(saganExporter), r_dazHelpers(dazHelpers), r_dthWriter(dthWriter)
 {
@@ -230,10 +231,22 @@ void Sagan::AlembicNodeDecoder::initObject(DzNode* node, const AlembicObjectPtr&
 
 void Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const
 {
+	// The breadcrumb per node, not just per frame: these are DzNode pointers
+	// decoded once and dereferenced every frame with processEvents() running
+	// in between - if one goes stale, the fault report has to name it.
+	int nodeIndex = 0;
+
 	for (const auto& node : m_exportableNodes)
 	{
+		DthFaultProbe::setNodeIndex(nodeIndex);
+		DthFaultProbe::setNode(node->getLabel());
+
 		writeObject(node, firstFrame);
+
+		nodeIndex++;
 	}
+
+	DthFaultProbe::setNodeIndex(-1);
 }
 
 void Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame) const

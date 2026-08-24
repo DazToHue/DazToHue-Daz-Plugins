@@ -78,6 +78,8 @@ add_library( ${DZ_PLUGIN_TGT_NAME} SHARED
 	dth/dth_writer.h
 	dth/dth_logger.cpp
 	dth/dth_logger.h
+	dth/dth_fault_probe.cpp
+	dth/dth_fault_probe.h
 	dth/dth_exporter.cpp
 	dth/dth_exporter.h
 	fbx/fbx_common.cpp

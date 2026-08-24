@@ -3,6 +3,7 @@
 
 #include "../daz/daz_helpers.h"
 #include "../dth/dth_static_helpers.h"
+#include "../dth/dth_fault_probe.h"
 
 #include "alembic_exporter.h"
 #include "sagan/decoder/alembic_node_decoder.h"
@@ -60,10 +61,14 @@ void DthAlembicExporter::doRomExport()
 		alembicNodeDecoder.decodeSelected(selectedRootNode_);
 
 		// Export frames
+		DthFaultProbe::setStage("alembic ROM");
+
 		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames %1 to %2").arg(startFrame).arg(endFrame));
 
 		for (currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
 		{
+			DthFaultProbe::setFrame(currentFrame);
+
 			alembicProgress.setCurrentInfo("Exporting alembic frame " + QString::number(currentFrame));
 
 			// A marker every 10 frames: enough to locate a silent death, few
@@ -153,6 +158,8 @@ void DthAlembicExporter::doGroomPosesExport()
 		alembicNodeDecoder.decodeSelected(selectedRootNode_);
 
 		// Export frames
+		DthFaultProbe::setStage("alembic groom poses");
+
 		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames"));
 
 		for (currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
