@@ -155,10 +155,29 @@ Sagan::Vertices Sagan::getOptimizedMeshVertices(const DzNode* node, const Visibl
 	const auto facetMesh = getFacetMesh(node);
 	auto verticesPtr = facetMesh->getVerticesPtr();
 
+	// The index map was computed at decode time; the vertex buffer is the LIVE
+	// mesh, re-fetched every frame while interactive updates are enabled and
+	// processEvents() runs between frames. Those can disagree: measured
+	// 2026-08-24 (2.1.5's fault probe), an async re-cook shrank
+	// 'GoldenPalaceG9_Shell_Minora' between decode and frame 0 and a stale
+	// index read one page past the new buffer - ACCESS_VIOLATION at
+	// getOptimizedMeshVertices+0xd4, intermittent because it races the update.
+	// A stale map means the frame CANNOT be exported correctly (a clamp would
+	// write wrong geometry, silently), so say precisely what disagreed and let
+	// the containment above report it.
+	const auto liveVertexCount = facetMesh->getNumVertices();
+
 	for (size_t i = 0; i < visible2OriginalVertexIndices.size(); i++)
 	{
 
 		const auto originalVertexIndex = visible2OriginalVertexIndices.at(i);
+
+		if (originalVertexIndex < 0 || originalVertexIndex >= liveVertexCount)
+		{
+			throw std::runtime_error(QString("mesh '%1' changed under the export: decode-time vertex index %2 is outside the live mesh (%3 vertices) - the scene was still cooking; export again")
+				.arg(node->getLabel()).arg(originalVertexIndex).arg(liveVertexCount).toUtf8().constData());
+		}
+
 		const auto v = verticesPtr[originalVertexIndex];
 		vertices.push_back({ v[0], v[1], v[2] });
 
