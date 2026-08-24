@@ -49,6 +49,16 @@ namespace Sagan
 
 	using AlembicObjectPtr = std::shared_ptr <Alembic::AbcGeom::OObject>;
 	using ExportableNodes = std::set<DzNode*>;
+	// A mesh's vertex count as it was at DECODE time, alongside the node it
+	// came from. The index map built for that node is only valid while the
+	// live mesh still has this many vertices - see getUnstableMeshes().
+	struct DecodedMeshSize
+	{
+		DzNode* node = nullptr;
+		QString label;
+		int decodeVertexCount = 0;
+	};
+
 	using NodeNameFormatterCallbackType = std::function<std::string(DzNode* node)>;
 
 	class AlembicNodeDecoder
@@ -63,6 +73,17 @@ namespace Sagan
 		void setShapeNameFormatter(NodeNameFormatterCallbackType nodeNameFormatter);
 		std::string getFormattedShapeNameAsString(DzNode* node);
 		ExportableNodes getExportableNodes() const;
+
+		/**
+			Decoded meshes whose LIVE vertex count no longer matches the count
+			they were decoded with, as "'<label>' <decoded> -> <live>" lines.
+
+			Empty means every index map this decoder built still addresses the
+			mesh the frame loop will read. Anything else means the maps are
+			stale and reading with them is an out-of-bounds access - the
+			measured crash of 2026-08-24.
+		*/
+		QStringList getUnstableMeshes() const;
 
 	private:
 		NodeNameFormatterCallbackType nodeNameFormatter_;
@@ -84,6 +105,14 @@ namespace Sagan
 		std::shared_ptr<Alembic::AbcGeom::OObject> getTopLevelObjectPointer();
 
 		ExportableNodes m_exportableNodes;
+
+		// NOTE: m_exportableNodes is a std::set<DzNode*>, so it orders by
+		// POINTER VALUE - heap layout, stable within a session, different
+		// between runs. writeObjects() iterates it, which is why two runs of
+		// one build produce Alembics with identical geometry at different byte
+		// offsets. Anything needing scene order reads m_decodedMeshSizes,
+		// which initObject() fills parents-before-children.
+		std::vector<DecodedMeshSize> m_decodedMeshSizes;
 	};
 
 }

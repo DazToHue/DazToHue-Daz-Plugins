@@ -37,6 +37,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "dzscene.h"
 #include "dzfigure.h"
+#include "dzfacetmesh.h"
 
 #include "../../../version.h"
 #include "../../../dth/dth_fault_probe.h"
@@ -181,6 +182,15 @@ void Sagan::AlembicNodeDecoder::initObject(DzNode* node, const AlembicObjectPtr&
 	const auto label = node->getLabel();
 	const auto stdName = getFormattedShapeNameAsString(node);
 
+	// Remember how big this mesh was when its index map was built. The map
+	// below is const from here on while the frame loop re-reads the LIVE
+	// mesh, so this count is what makes "still the same mesh?" answerable -
+	// see getUnstableMeshes().
+	{
+		DzFacetMesh* decodeTimeMesh = Sagan::getFacetMesh(node);
+		m_decodedMeshSizes.push_back({ node, label, decodeTimeMesh != nullptr ? decodeTimeMesh->getNumVertices() : -1 });
+	}
+
 	// Reserve the alembic mesh
 	auto container = std::make_shared< Alembic::AbcGeom::OXform>(*parent, stdName, saganExporter->getTimeSampling());
 	auto meshObj = std::make_shared< Alembic::AbcGeom::OPolyMesh>(*container, stdName, saganExporter->getTimeSampling());
@@ -227,6 +237,24 @@ void Sagan::AlembicNodeDecoder::initObject(DzNode* node, const AlembicObjectPtr&
 
 	// Decode child nodes
 	decodeChildNodes(node, parent);
+}
+
+QStringList Sagan::AlembicNodeDecoder::getUnstableMeshes() const
+{
+	QStringList changed;
+
+	for (const auto& decoded : m_decodedMeshSizes)
+	{
+		DzFacetMesh* liveMesh = Sagan::getFacetMesh(decoded.node);
+		const int liveVertexCount = liveMesh != nullptr ? liveMesh->getNumVertices() : -1;
+
+		if (liveVertexCount != decoded.decodeVertexCount)
+		{
+			changed.append(QString("'%1' %2 -> %3").arg(decoded.label).arg(decoded.decodeVertexCount).arg(liveVertexCount));
+		}
+	}
+
+	return changed;
 }
 
 void Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const
