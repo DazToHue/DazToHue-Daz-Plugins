@@ -6,7 +6,7 @@
 	This header is the ONLY place in the tree that knows which generation it is
 	being compiled for. DAZ_SDK_MAJOR_VERSION comes from CMake (4 or 6).
 
-	Three differences genuinely need it - each one verified against the two
+	Four differences genuinely need it - each one verified against the two
 	SDK headers, not assumed:
 
 	  1. The Documents folder. Qt dropped QDesktopServices::storageLocation in
@@ -19,6 +19,15 @@
 	     (dznode.h:196) and has no other spelling; SDK6 has the corrected
 	     `isVisibleInRender` (dznode.h:350) and keeps the typo only as a
 	     deprecated alias marked "TODO : SDK Next : remove" (dznode.h:453).
+	  4. Raising an error the CALLING SCRIPT can catch. The Daz SDK offers no
+	     script-error API of its own (nothing in dzapp.h / dzscript.h /
+	     dpcscript.h), so this goes through the underlying engine, and the two
+	     generations do not share one: DS4 is QtScript
+	     (QScriptContext::throwError, qscriptcontext.h:85 - and the measured
+	     crash message names QScriptEngine, so DS4's DzScript is confirmed to
+	     host one), DS6 is QJSEngine (QJSEngine::throwError, qjsengine.h:323,
+	     reached via qjsEngine(QObject*), qjsengine.h:424). See the
+	     QScriptable note and raiseScriptError() below.
 
 	Everything else that LOOKS like it needs a shim does not, and the sources
 	are written the portable way instead:
@@ -42,6 +51,7 @@
 */
 
 #include <QtCore/QString>
+#include <QtCore/QObject>
 
 #include "dznode.h"
 #include "dzscript.h"
@@ -49,9 +59,41 @@
 #if DAZ_SDK_MAJOR_VERSION >= 6
 	#include <QStandardPaths>
 	#include <QJSValue>			// what DzScript::result() returns on SDK6
+	#include <QJSEngine>		// how SDK6 raises an error into the caller
 #else
 	#include <QtGui/QDesktopServices>
 	#include <QtCore/QVariant>	// what DzScript::result() returns on SDK4
+	#include <QtScript/QScriptable>
+	#include <QtScript/QScriptContext>
+#endif
+
+/*
+	QScriptable on SDK6.
+
+	A class whose Q_INVOKABLE methods must be able to raise a catchable error
+	names `public QScriptable` in its base clause (see
+	dth_exporter_action.h). On SDK4 that is Qt's own class, included above,
+	and the spelling is load-bearing: QtScript finds the subobject with
+	qt_metacast("QScriptable"), and moc only emits that metacast entry for a
+	base it sees under that literal name - so a typedef or a wrapper class
+	would compile and then never be found at runtime.
+
+	Qt6 has no QtScript, and SDK6 does not need it (QJSEngine is reached from
+	the object itself) - but the base clause still has to PARSE on SDK6, and
+	it cannot get there through a macro: moc does not expand one in a base
+	clause. It silently drops the whole class instead ("No relevant classes
+	found. No output generated."), the metaobject is never generated, and the
+	build fails at the moc_*.cpp include - measured 2026-08-21, which is why
+	the base is named directly rather than hidden behind one.
+
+	So SDK6 gets an empty stand-in under the same name. Nothing queries it
+	there. It is safe because Qt6 removed QtScript outright: there is no real
+	QScriptable for it to collide with.
+*/
+#if DAZ_SDK_MAJOR_VERSION >= 6
+	class QScriptable
+	{
+	};
 #endif
 
 namespace DthCompat
@@ -124,6 +166,43 @@ namespace DthCompat
 		disposeScript( script );
 
 		return ok;
+	}
+
+	/**
+		Raise `message` as an error in the script that is currently calling
+		into us, so its own try/catch sees it. Call this from INSIDE a
+		Q_INVOKABLE, on the object the script invoked, having already caught
+		the C++ exception - a C++ exception must never unwind into the engine
+		(that is the crash this exists to prevent).
+
+		False means the error could not be handed to a script - either nothing
+		scripted is calling (the dialog path, where the caller shows its own
+		message box) or the engine did not expose us. Callers must treat false
+		as "the caller will NOT learn about this from an exception" and say so
+		in the log rather than assume it landed.
+	*/
+	inline bool raiseScriptError( QObject* invokedObject, const QString& message )
+	{
+		if ( !invokedObject ) return false;
+
+#if DAZ_SDK_MAJOR_VERSION >= 6
+		QJSEngine* engine = qjsEngine( invokedObject );
+		if ( !engine ) return false;
+
+		engine->throwError( message );
+		return true;
+#else
+		// Exactly how QtScript itself finds a QScriptable subobject: a
+		// metacast by name (see DTH_SCRIPTABLE_BASES above).
+		void* scriptablePtr = invokedObject->qt_metacast( "QScriptable" );
+		if ( !scriptablePtr ) return false;
+
+		QScriptContext* context = reinterpret_cast<QScriptable*>( scriptablePtr )->context();
+		if ( !context ) return false;	// not reached through a script
+
+		context->throwError( message );
+		return true;
+#endif
 	}
 
 	/** Whether a node is visible in renders. */
