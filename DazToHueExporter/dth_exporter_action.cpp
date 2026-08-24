@@ -12,6 +12,7 @@
 #include "dzmainwindow.h"
 
 #include "dth/dth_exporter.h"
+#include "dth/dth_fault_probe.h"
 
 void entryPoint(DzMainWindow* mw)
 {
@@ -92,24 +93,38 @@ void DazToHueExporterAction::runGuardedExport(const QString& entryPointName, con
 {
 	QString failure;
 
+	DthFaultProbe::clear();
+
 	try
 	{
-		exportBody();
-		return;
+		// The __try inside runProtected() catches what a C++ catch cannot: a
+		// hard fault (an access violation under /EHsc is not a C++ exception).
+		// Measured 2026-08-24 - two mid-frame deaths that reached neither the
+		// frame loop's catch nor the ones below, and left Daz to log
+		// dzscript.cpp(1192) on our behalf. C++ exceptions still pass straight
+		// through to the catches here; only a fault takes the false branch.
+		DthFaultProbe::FaultReport report;
+
+		if (DthFaultProbe::runProtected(exportBody, report))
+		{
+			return;
+		}
+
+		failure = QString("%1 while %2")
+			.arg(DthFaultProbe::describeFault(report))
+			.arg(DthFaultProbe::describeBreadcrumb());
 	}
 	catch (const std::exception& e)
 	{
-		failure = QString::fromUtf8(e.what());
+		failure = QString("%1 (while %2)")
+			.arg(QString::fromUtf8(e.what()))
+			.arg(DthFaultProbe::describeBreadcrumb());
 	}
 	catch (...)
 	{
-		failure = "an unrecognised error";
+		failure = QString("an unrecognised error (while %1)").arg(DthFaultProbe::describeBreadcrumb());
 	}
 
-	// Note: a C++ catch does not contain a hard fault (an access violation
-	// under /EHsc is not a C++ exception), so a failure that leaves NO trace
-	// here is still possible - the exporter's own per-frame logging is what
-	// locates that case.
 	const QString message = QString("DazToHue Exporter: %1 failed - %2").arg(entryPointName).arg(failure);
 	dzApp->log(message);
 

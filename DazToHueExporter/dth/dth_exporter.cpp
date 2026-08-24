@@ -18,6 +18,7 @@
 #include "fbx/fbx_exporter.h"
 #include "alembic/sagan/output_transformer/houdini_alembic_output_transformer.h"
 #include "alembic/alembic_exporter.h"
+#include "dth_fault_probe.h"
 
 namespace
 {
@@ -124,6 +125,7 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 	try
 	{
 		// Pre-process scene
+		DthFaultProbe::setStage("preprocessing scene");
 		exportProgress.setCurrentInfo("Preprocessing scene");
 		dazHelpers.preprocessScene();
 		exportProgress.step();
@@ -135,12 +137,15 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 		exportProgress.step();
 
 		// Export fbx ROM files
+		DthFaultProbe::setStage("fbx ROMs");
 		fbxExporter.exportRoms();
 		exportProgress.step();
+		DthFaultProbe::setStage("fbx experimental ROM");
 		fbxExporter.exportExperimentalRomAnimation();
 		exportProgress.step();
 
 		// Export reference frames
+		DthFaultProbe::setStage("fbx reference frames");
 		fbxExporter.exportSkeletonReferenceFrames(referenceFrames);
 		exportProgress.step();
 
@@ -148,6 +153,7 @@ void DthExporter::doExport(QString exportDirectory, QString characterName, QStri
 		// and it is only created once everything it points at exists.
 		dthLogger.log(LogLevel::DTHINFO, QString("Writing DTH file"));
 		exportProgress.setCurrentInfo("Writing DTH file");
+		DthFaultProbe::setStage("writing DTH file");
 		dthWriter.writeFile();
 		exportProgress.step();
 	}
