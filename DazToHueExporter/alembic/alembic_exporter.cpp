@@ -111,6 +111,16 @@ void DthAlembicExporter::doRomExport()
 			// all-frozen test cannot see a body that outruns its clothes.
 			if (previousFrameStale)
 			{
+				// Scene-level first: DzScene::update() (identical on both
+				// generations; a Q_SLOT on DS6) runs the evaluation pass a
+				// viewport draw would - and "works interactively, freezes
+				// unattended" is exactly the shape of this bug: the maintainer
+				// builds characters in a live Daz and has never seen it; every
+				// degraded run here was an unattended Runner session where
+				// nothing draws. Then the per-node update+finalize, which
+				// alone was measured insufficient (472/483 frames, no change).
+				dzScene->update();
+
 				alembicNodeDecoder.refreshExportedGeometry();
 			}
 
