@@ -151,8 +151,16 @@ void DthAlembicExporter::doRomExport()
 
 			if (everythingFrozen)
 			{
-				throw std::runtime_error(QString("the ROM walk ran %1 frames but the scene never re-evaluated: every one of the %2 exported meshes is a statue (identical geometry on every frame). The scene's animation data is intact; Daz did not evaluate it during the export. Close and reopen the scene (or restart Daz Studio) and export again.")
-					.arg(endFrame - startFrame + 1).arg(frozenMeshes.count()).toUtf8().constData());
+				// Two measured ways to get here (both 2026-08-25): a session
+				// where Daz stopped evaluating setFrame() during the walk
+				// (484 identical samples at 10x speed), and an export that ran
+				// against the DEFAULT 0..30 play range because the ROM was
+				// never applied to the scene - frames genuinely identical
+				// because nothing is animated. The message must not claim to
+				// know which; the frame count is the caller's tell (a real ROM
+				// is hundreds of frames, the default range is 31).
+				throw std::runtime_error(QString("statue export: all %2 meshes are byte-identical across every one of the %1 frames walked (play range %3..%4). Either the ROM was never applied to the scene before exporting - check the frame count, the default range is 31 - or Daz stopped evaluating the scene during the walk. Re-run with the ROM applied; if the range was correct, close and reopen the scene (or restart Daz Studio) first.")
+					.arg(endFrame - startFrame + 1).arg(frozenMeshes.count()).arg(startFrame).arg(endFrame).toUtf8().constData());
 			}
 		}
 	}
