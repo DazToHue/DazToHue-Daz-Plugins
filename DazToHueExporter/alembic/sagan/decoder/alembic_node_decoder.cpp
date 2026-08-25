@@ -284,20 +284,6 @@ int Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const
 	return moved;
 }
 
-void Sagan::AlembicNodeDecoder::refreshExportedGeometry() const
-{
-	for (DzNode* node : m_exportableNodes)
-	{
-		if (DazStaticHelpers::isStrandBasedHair(node)) continue;
-
-		if (DzObject* object = node->getObject())
-		{
-			object->update(*node, false);
-			object->finalize(*node, false);
-		}
-	}
-}
-
 bool Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame) const
 {
 	const auto label = node->getLabel();

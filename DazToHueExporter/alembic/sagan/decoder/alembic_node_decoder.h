@@ -91,15 +91,6 @@ namespace Sagan
 		*/
 		int writeObjects(bool firstFrame) const;
 
-		/**
-			Ask Daz to evaluate the exported nodes' geometry NOW, via
-			DzObject::update() + finalize() - the two-step evaluation both SDKs
-			declare identically (dzobject.h DS4:78, DS6:86). This is NOT the
-			reverted per-frame forceCacheUpdate() of #2/#8: it runs only when a
-			frame was measured stale, never unconditionally. Strand-based hair
-			is skipped - force-evaluating an SBH node hangs DS6 (ticket 503956).
-		*/
-		void refreshExportedGeometry() const;
 		void setShapeNameFormatter(NodeNameFormatterCallbackType nodeNameFormatter);
 		std::string getFormattedShapeNameAsString(DzNode* node);
 		ExportableNodes getExportableNodes() const;

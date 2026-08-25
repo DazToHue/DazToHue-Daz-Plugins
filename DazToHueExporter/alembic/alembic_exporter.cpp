@@ -75,8 +75,8 @@ void DthAlembicExporter::doRomExport()
 		// exported correctly an hour earlier; whatever suppresses evaluation
 		// is a session state, not scene data (the saved ROM has 3,978 fully
 		// keyed channels). So the loop measures whether geometry actually
-		// changed, re-asks Daz to evaluate when it did not, and the gate
-		// after the loop refuses to report a statue as success.
+		// changed, warns when it did not, and the gate after the loop refuses
+		// to report a statue as success.
 		int staleFrames = 0;
 		bool previousFrameStale = false;
 
@@ -97,33 +97,16 @@ void DthAlembicExporter::doRomExport()
 
 			QApplication::processEvents();
 
-			// The previous frame left at least one mesh byte-identical, so
-			// evaluation is not keeping up with setFrame() for part of the
-			// scene. Ask for it directly (update+finalize on the exported
-			// nodes) before this frame is sampled. This runs ONLY on that
-			// evidence - it is not the reverted always-on forcing of #2/#8.
-			//
-			// "Any mesh", not "every mesh": measured 2026-08-25 12:01 (Ita,
-			// 2.1.10 hash metric, run 2 of a same-session pair), the figure
-			// moved on 464 of 484 frames while its FOLLOWERS froze - Eyes 110
-			// (476 in the healthy run 18 minutes earlier), clothing 83-88
-			// (483), boots 45 (483) - and the export reported success. An
-			// all-frozen test cannot see a body that outruns its clothes.
-			if (previousFrameStale)
-			{
-				// Scene-level first: DzScene::update() (identical on both
-				// generations; a Q_SLOT on DS6) runs the evaluation pass a
-				// viewport draw would - and "works interactively, freezes
-				// unattended" is exactly the shape of this bug: the maintainer
-				// builds characters in a live Daz and has never seen it; every
-				// degraded run here was an unattended Runner session where
-				// nothing draws. Then the per-node update+finalize, which
-				// alone was measured insufficient (472/483 frames, no change).
-				dzScene->update();
-
-				alembicNodeDecoder.refreshExportedGeometry();
-			}
-
+			// Detection only, deliberately. A recovery was tried and measured
+			// dead: every public evaluation call - per-node update+finalize
+			// (both isRender flavors), DzScene::update(), event pumping -
+			// fired on 400+ frames of every degraded run and recovered zero;
+			// the render flavor additionally re-cooked at an uncontrollable
+			// resolution and its teardown hung Daz. The freeze is a per-Daz-
+			// session state (a scene RE-loaded into a session exports frozen
+			// followers; a fresh session is healthy - 5/5 and 3/3 measured)
+			// and the studio prevents it upstream by running one row per Daz
+			// session and gating on the motion summary below (its PR #971).
 			const int meshesMoved = alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
 
 			previousFrameStale = (currentFrame > startFrame && meshesMoved < alembicNodeDecoder.getWrittenMeshCount());
@@ -134,7 +117,7 @@ void DthAlembicExporter::doRomExport()
 
 				if (dthLogger_ != nullptr && (staleFrames == 1 || staleFrames % 100 == 0))
 				{
-					dthLogger_->log(LogLevel::DTHWARNGING, QString("Frame %1 sampled %2 of %3 meshes unchanged (%4 affected frame(s) so far) - re-requesting evaluation").arg(currentFrame).arg(alembicNodeDecoder.getWrittenMeshCount() - meshesMoved).arg(alembicNodeDecoder.getWrittenMeshCount()).arg(staleFrames));
+					dthLogger_->log(LogLevel::DTHWARNGING, QString("Frame %1 sampled %2 of %3 meshes unchanged (%4 affected frame(s) so far)").arg(currentFrame).arg(alembicNodeDecoder.getWrittenMeshCount() - meshesMoved).arg(alembicNodeDecoder.getWrittenMeshCount()).arg(staleFrames));
 				}
 			}
 
