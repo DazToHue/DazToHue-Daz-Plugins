@@ -97,11 +97,18 @@ void DthAlembicExporter::doRomExport()
 
 			QApplication::processEvents();
 
-			// The previous frame's sample came out byte-identical for every
-			// mesh, so evaluation is not keeping up with setFrame(). Ask for
-			// it directly (update+finalize on the exported nodes) before this
-			// frame is sampled. This runs ONLY on that evidence - it is not
-			// the reverted always-on forcing of #2/#8.
+			// The previous frame left at least one mesh byte-identical, so
+			// evaluation is not keeping up with setFrame() for part of the
+			// scene. Ask for it directly (update+finalize on the exported
+			// nodes) before this frame is sampled. This runs ONLY on that
+			// evidence - it is not the reverted always-on forcing of #2/#8.
+			//
+			// "Any mesh", not "every mesh": measured 2026-08-25 12:01 (Ita,
+			// 2.1.10 hash metric, run 2 of a same-session pair), the figure
+			// moved on 464 of 484 frames while its FOLLOWERS froze - Eyes 110
+			// (476 in the healthy run 18 minutes earlier), clothing 83-88
+			// (483), boots 45 (483) - and the export reported success. An
+			// all-frozen test cannot see a body that outruns its clothes.
 			if (previousFrameStale)
 			{
 				alembicNodeDecoder.refreshExportedGeometry();
@@ -109,15 +116,15 @@ void DthAlembicExporter::doRomExport()
 
 			const int meshesMoved = alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
 
-			previousFrameStale = (currentFrame > startFrame && meshesMoved == 0);
+			previousFrameStale = (currentFrame > startFrame && meshesMoved < alembicNodeDecoder.getWrittenMeshCount());
 
 			if (previousFrameStale)
 			{
 				staleFrames++;
 
-				if (dthLogger_ != nullptr && (staleFrames == 1 || staleFrames % 50 == 0))
+				if (dthLogger_ != nullptr && (staleFrames == 1 || staleFrames % 100 == 0))
 				{
-					dthLogger_->log(LogLevel::DTHWARNGING, QString("Frame %1 sampled with NO geometry change on any mesh (%2 stale frame(s) so far) - re-requesting evaluation").arg(currentFrame).arg(staleFrames));
+					dthLogger_->log(LogLevel::DTHWARNGING, QString("Frame %1 sampled %2 of %3 meshes unchanged (%4 affected frame(s) so far) - re-requesting evaluation").arg(currentFrame).arg(alembicNodeDecoder.getWrittenMeshCount() - meshesMoved).arg(alembicNodeDecoder.getWrittenMeshCount()).arg(staleFrames));
 				}
 			}
 
@@ -128,7 +135,7 @@ void DthAlembicExporter::doRomExport()
 
 		if (staleFrames > 0 && dthLogger_ != nullptr)
 		{
-			dthLogger_->log(LogLevel::DTHWARNGING, QString("%1 of %2 frames sampled no geometry change on any mesh").arg(staleFrames).arg(endFrame - startFrame));
+			dthLogger_->log(LogLevel::DTHWARNGING, QString("%1 of %2 frames left at least one mesh unchanged").arg(staleFrames).arg(endFrame - startFrame));
 		}
 
 		// The gate. A multi-frame ROM in which NOTHING ever moved is a statue
