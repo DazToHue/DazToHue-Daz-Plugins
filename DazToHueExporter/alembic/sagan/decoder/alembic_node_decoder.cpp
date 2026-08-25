@@ -292,15 +292,8 @@ void Sagan::AlembicNodeDecoder::refreshExportedGeometry() const
 
 		if (DzObject* object = node->getObject())
 		{
-			// isRender = TRUE - the RENDER-path evaluation, not the viewport
-			// flavor. Everything tried with isRender=false (per-node here,
-			// DzScene::update() upstream, event pumping) was measured
-			// ineffective against the follower freeze: 400+ firings per
-			// degraded run, zero frames recovered, five sessions. Renders are
-			// never wrong about followers, so the render flavor is the last
-			// untried public lever below forceCacheUpdate() (the known crash).
-			object->update(*node, true);
-			object->finalize(*node, true, false);
+			object->update(*node, false);
+			object->finalize(*node, false);
 		}
 	}
 }
