@@ -229,6 +229,26 @@ void Sagan::AlembicNodeDecoder::initObject(DzNode* node, const AlembicObjectPtr&
 	decodeChildNodes(node, parent);
 }
 
+QStringList Sagan::AlembicNodeDecoder::getFrozenMeshes() const
+{
+	QStringList frozen;
+
+	for (const auto& [label, motion] : m_motionByLabel)
+	{
+		// framesWritten > 1: a single-frame bake cannot "move" and is not a
+		// statue. framesMoved == 0 across a multi-frame walk means every
+		// sample after the first was byte-identical to its predecessor.
+		if (motion.framesWritten > 1 && motion.framesMoved == 0) frozen.append(label);
+	}
+
+	return frozen;
+}
+
+int Sagan::AlembicNodeDecoder::getWrittenMeshCount() const
+{
+	return static_cast<int>(m_motionByLabel.size());
+}
+
 QStringList Sagan::AlembicNodeDecoder::getMotionSummary() const
 {
 	QStringList lines;
@@ -241,27 +261,30 @@ QStringList Sagan::AlembicNodeDecoder::getMotionSummary() const
 	return lines;
 }
 
-void Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const
+int Sagan::AlembicNodeDecoder::writeObjects(bool firstFrame) const
 {
 	// The breadcrumb per node, not just per frame: these are DzNode pointers
 	// decoded once and dereferenced every frame with processEvents() running
 	// in between - if one goes stale, the fault report has to name it.
 	int nodeIndex = 0;
+	int moved = 0;
 
 	for (const auto& node : m_exportableNodes)
 	{
 		DthFaultProbe::setNodeIndex(nodeIndex);
 		DthFaultProbe::setNode(node->getLabel());
 
-		writeObject(node, firstFrame);
+		if (writeObject(node, firstFrame)) moved++;
 
 		nodeIndex++;
 	}
 
 	DthFaultProbe::setNodeIndex(-1);
+
+	return moved;
 }
 
-void Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame) const
+bool Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame) const
 {
 	const auto label = node->getLabel();
 	const auto& exportableMeshObjectPtr = saganExporter->getExportableMeshObjects().at(label);
@@ -269,46 +292,47 @@ void Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame)
 
 	std::vector<Imath::V3f> alembicVertices;
 
-	// Bounds are accumulated in the transform loop that has to run anyway, so
-	// the motion accounting below costs nothing extra: no second pass, and six
-	// doubles plus two counters per mesh. It answers the one question a normal
-	// export log could not - did this mesh actually move this frame.
-	std::array<double, 6> bounds{};
-	bool haveBounds = false;
+	// The motion hash accumulates in the transform loop that has to run
+	// anyway - no second pass, one uint64 per mesh. FNV-1a over the exact
+	// float bits that go into the archive: if this hash repeats, the sample
+	// IS a byte-identical repeat (and Ogawa will deduplicate it on disk).
+	// A bounding box was tried first and lied - see MeshMotion in the header.
+	std::uint64_t frameHash = 1469598103934665603ull;
 
 	for (const auto& vertex : vertices)
 	{
 		const auto transformedVertex = saganExporter->getOutputTransformer()->vertex(vertex);
-		alembicVertices.push_back(Imath::V3f(transformedVertex[0], transformedVertex[1], transformedVertex[2]));
+		const Imath::V3f v(transformedVertex[0], transformedVertex[1], transformedVertex[2]);
+		alembicVertices.push_back(v);
 
 		for (int axis = 0; axis < 3; axis++)
 		{
-			const double value = transformedVertex[axis];
+			std::uint32_t bits;
+			std::memcpy(&bits, &v[axis], sizeof(bits));
 
-			if (!haveBounds)
+			for (int byte = 0; byte < 4; byte++)
 			{
-				bounds[axis] = value;
-				bounds[axis + 3] = value;
-			}
-			else
-			{
-				if (value < bounds[axis]) bounds[axis] = value;
-				if (value > bounds[axis + 3]) bounds[axis + 3] = value;
+				frameHash ^= (bits >> (byte * 8)) & 0xff;
+				frameHash *= 1099511628211ull;
 			}
 		}
-
-		haveBounds = true;
 	}
+
+	bool movedThisFrame = false;
 
 	{
 		MeshMotion& motion = m_motionByLabel[label];
 
 		motion.framesWritten++;
 
-		if (motion.haveLastBounds && bounds != motion.lastBounds) motion.framesMoved++;
+		if (motion.haveLastHash && frameHash != motion.lastHash)
+		{
+			motion.framesMoved++;
+			movedThisFrame = true;
+		}
 
-		motion.lastBounds = bounds;
-		motion.haveLastBounds = haveBounds;
+		motion.lastHash = frameHash;
+		motion.haveLastHash = true;
 	}
 
 	auto& meshSchema = saganExporter->getAlembicMeshObjects().at(label)->getSchema();
@@ -363,6 +387,8 @@ void Sagan::AlembicNodeDecoder::writeObject(const DzNode* node, bool firstFrame)
 			//Logger::getInstance().log(FILEANDLINE) << "something went wrong";
 		}
 	}
+
+	return movedThisFrame;
 }
 
 Sagan::ExportableNodes Sagan::AlembicNodeDecoder::getExportableNodes() const

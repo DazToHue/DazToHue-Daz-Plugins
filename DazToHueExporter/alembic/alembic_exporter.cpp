@@ -66,6 +66,20 @@ void DthAlembicExporter::doRomExport()
 
 		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames %1 to %2").arg(startFrame).arg(endFrame));
 
+		// Staleness accounting for the loop below. setFrame() +
+		// processEvents() is a REQUEST to evaluate, not a guarantee: measured
+		// 2026-08-25 (Ita, DS4, 2.1.9), a 484-frame walk ran ~10x fast,
+		// sampled the rest pose 484 times, wrote a 23.7 MB statue archive and
+		// reported success - which then cost the previous good export its
+		// .dthprev backups. Same scene, same build, same session shape
+		// exported correctly an hour earlier; whatever suppresses evaluation
+		// is a session state, not scene data (the saved ROM has 3,978 fully
+		// keyed channels). So the loop measures whether geometry actually
+		// changed, warns when it did not, and the gate after the loop refuses
+		// to report a statue as success.
+		int staleFrames = 0;
+		bool previousFrameStale = false;
+
 		for (currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
 		{
 			DthFaultProbe::setFrame(currentFrame);
@@ -83,12 +97,72 @@ void DthAlembicExporter::doRomExport()
 
 			QApplication::processEvents();
 
-			alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+			// Detection only, deliberately. A recovery was tried and measured
+			// dead: every public evaluation call - per-node update+finalize
+			// (both isRender flavors), DzScene::update(), event pumping -
+			// fired on 400+ frames of every degraded run and recovered zero;
+			// the render flavor additionally re-cooked at an uncontrollable
+			// resolution and its teardown hung Daz. The freeze is a per-Daz-
+			// session state (a scene RE-loaded into a session exports frozen
+			// followers; a fresh session is healthy - 5/5 and 3/3 measured)
+			// and the studio prevents it upstream by running one row per Daz
+			// session and gating on the motion summary below (its PR #971).
+			const int meshesMoved = alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+
+			previousFrameStale = (currentFrame > startFrame && meshesMoved < alembicNodeDecoder.getWrittenMeshCount());
+
+			if (previousFrameStale)
+			{
+				staleFrames++;
+
+				if (dthLogger_ != nullptr && (staleFrames == 1 || staleFrames % 100 == 0))
+				{
+					dthLogger_->log(LogLevel::DTHWARNGING, QString("Frame %1 sampled %2 of %3 meshes unchanged (%4 affected frame(s) so far)").arg(currentFrame).arg(alembicNodeDecoder.getWrittenMeshCount() - meshesMoved).arg(alembicNodeDecoder.getWrittenMeshCount()).arg(staleFrames));
+				}
+			}
 
 			alembicProgress.step();
 		}
 
 		motionSummary = alembicNodeDecoder.getMotionSummary();
+
+		if (staleFrames > 0 && dthLogger_ != nullptr)
+		{
+			dthLogger_->log(LogLevel::DTHWARNGING, QString("%1 of %2 frames left at least one mesh unchanged").arg(staleFrames).arg(endFrame - startFrame));
+		}
+
+		// The gate. A multi-frame ROM in which NOTHING ever moved is a statue
+		// - the walk ran, the scene never followed - and reporting it as
+		// success is what destroyed a good export's backups on 2026-08-25.
+		// Throwing here reaches the caller through the same containment as
+		// every other failure: logged, script-visible, no .dth written (the
+		// manifest is written last), so the studio's export-landed guard
+		// fails the run and the backups survive.
+		const QStringList frozenMeshes = alembicNodeDecoder.getFrozenMeshes();
+
+		if (endFrame > startFrame && !frozenMeshes.isEmpty())
+		{
+			const bool everythingFrozen = frozenMeshes.count() == alembicNodeDecoder.getWrittenMeshCount();
+
+			for (const QString& label : frozenMeshes)
+			{
+				if (dthLogger_ != nullptr) dthLogger_->log(everythingFrozen ? LogLevel::DTHERROR : LogLevel::DTHWARNGING, QString("Mesh '%1' never changed across the ROM - a statue").arg(label));
+			}
+
+			if (everythingFrozen)
+			{
+				// Two measured ways to get here (both 2026-08-25): a session
+				// where Daz stopped evaluating setFrame() during the walk
+				// (484 identical samples at 10x speed), and an export that ran
+				// against the DEFAULT 0..30 play range because the ROM was
+				// never applied to the scene - frames genuinely identical
+				// because nothing is animated. The message must not claim to
+				// know which; the frame count is the caller's tell (a real ROM
+				// is hundreds of frames, the default range is 31).
+				throw std::runtime_error(QString("statue export: all %2 meshes are byte-identical across every one of the %1 frames walked (play range %3..%4). Either the ROM was never applied to the scene before exporting - check the frame count, the default range is 31 - or Daz stopped evaluating the scene during the walk. Re-run with the ROM applied; if the range was correct, close and reopen the scene (or restart Daz Studio) first.")
+					.arg(endFrame - startFrame + 1).arg(frozenMeshes.count()).arg(startFrame).arg(endFrame).toUtf8().constData());
+			}
+		}
 	}
 	catch (const std::exception& e)
 	{
