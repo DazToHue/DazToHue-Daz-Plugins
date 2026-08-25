@@ -316,6 +316,46 @@ void DazHelpers::processSubdivisionLevel(DzShape* shape)
 	{
 		hasSubdivisions_ = true;
 	}
+
+	if (shape == nullptr) return;
+
+	// Pin the RENDER SubD level to the (post-adjustment) viewport level for
+	// the duration of the export, remembering the original for restore. The
+	// DTH guide requires the two levels to MATCH per node, but Daz's own
+	// defaults violate that on every fresh scene (G9 loads at viewport 1 /
+	// render 2 - measured in both scene files on 2026-08-25), and the
+	// exporter never enforced it: before this, "SubDRenderLevel" appeared
+	// nowhere in this tree. It matters because any render-flavor evaluation
+	// (DzObject::update(node, true) - the staleness recovery) re-cooks the
+	// mesh at the RENDER level: with a mismatched pair that swaps the
+	// topology mid-walk, which the stale-mesh guard correctly refuses
+	// (measured: 3 of 3 runs failed at frame 2, 'Genesis 9' 69514+ -> 34876).
+	int pinnedLod = -1;
+	int pinnedViewportSubd = -1;
+	getSubdivisionLevel(shape, pinnedLod, pinnedViewportSubd);
+
+	if (pinnedViewportSubd < 0) return;
+
+	for (int index = 0; index < shape->getNumProperties(); index++)
+	{
+		DzProperty* property = shape->getProperty(index);
+		DzNumericProperty* numericProperty = qobject_cast<DzNumericProperty*>(property);
+
+		if (property->getName() == "SubDRenderLevel" && numericProperty)
+		{
+			const double originalRenderLevel = numericProperty->getDoubleValue();
+
+			if (originalRenderLevel != pinnedViewportSubd)
+			{
+				originalRenderSubdLevels_[shape] = originalRenderLevel;
+				numericProperty->setDoubleValue(pinnedViewportSubd);
+
+				if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Pinned render SubD %1 -> %2 on %3 for the export (mismatched pair)").arg(originalRenderLevel).arg(pinnedViewportSubd).arg(shape->getNode()->getLabel()));
+			}
+
+			break;
+		}
+	}
 }
 
 void DazHelpers::getSubdivisionLevel(DzShape* shape, int& lod, int& subd)
@@ -506,6 +546,26 @@ void DazHelpers::lockSubdivisionLevels()
 void DazHelpers::unlockSubdivisionLevels()
 {
 	if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Unlocking subdivision levels"));
+
+	// Restore any render SubD levels the export pinned - scene mutations must
+	// be restored (the invariant), and this runs on the failure path too via
+	// restoreSceneState().
+	for (const auto& [pinnedShape, originalRenderLevel] : originalRenderSubdLevels_)
+	{
+		for (int index = 0; index < pinnedShape->getNumProperties(); index++)
+		{
+			DzProperty* property = pinnedShape->getProperty(index);
+			DzNumericProperty* numericProperty = qobject_cast<DzNumericProperty*>(property);
+
+			if (property->getName() == "SubDRenderLevel" && numericProperty)
+			{
+				numericProperty->setDoubleValue(originalRenderLevel);
+				break;
+			}
+		}
+	}
+
+	originalRenderSubdLevels_.clear();
 
 	for (int i = 0; i < candidateNodes_.length(); i++)
 	{

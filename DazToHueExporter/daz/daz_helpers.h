@@ -90,6 +90,7 @@ private:
 	QStringList existingNodeNames_;
 	QStringList existingMaterialNames_;
 	std::map<std::string, int>* resolutionLevelMap_ = nullptr;
+	std::map<DzShape*, double> originalRenderSubdLevels_;
 	std::map<std::string, int>* subdivisionLevelMap_ = nullptr;
 	bool hasSubdivisions_ = false;
 	HiddenMaterials hiddenMaterials_;
