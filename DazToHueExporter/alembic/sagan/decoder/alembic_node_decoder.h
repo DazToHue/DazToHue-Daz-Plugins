@@ -38,6 +38,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <functional>
 #include <map>
 #include <array>
+#include <cstdint>
 
 #include "../../../daz/daz_static_helpers.h"
 #include "../../../dth/dth_static_helpers.h"
@@ -54,13 +55,22 @@ namespace Sagan
 	using NodeNameFormatterCallbackType = std::function<std::string(DzNode* node)>;
 
 	// How many frames a single mesh's geometry actually CHANGED on, recorded
-	// as the bake writes it. A fitted item sitting far below the figure here
-	// is a mesh that stopped following the body - the one thing a normal
-	// export log could not say.
+	// as the bake writes it. A mesh at 0 here is a statue: the walk advanced
+	// the frame and the scene never re-evaluated.
+	//
+	// The measure is a hash of the vertex data actually written, NOT a
+	// bounding box. A box answers "did the extents change", which is a proxy
+	// that disagrees with the geometry: measured 2026-08-25, three runs
+	// reported the figure moving on 131 of 484 frames while writing a
+	// full-size 1.1 GB archive - and Ogawa deduplicates identical samples, so
+	// a genuinely frozen bake collapses to 23.7 MB (which the 0-of-484 run
+	// did). Full size means the data was changing while the box was not. A
+	// hash cannot disagree with the file that way, and it is what any gate
+	// built on this must be able to trust.
 	struct MeshMotion
 	{
-		std::array<double, 6> lastBounds{};
-		bool haveLastBounds = false;
+		std::uint64_t lastHash = 0;
+		bool haveLastHash = false;
 		int framesWritten = 0;
 		int framesMoved = 0;
 	};
@@ -73,13 +83,38 @@ namespace Sagan
 		~AlembicNodeDecoder();
 
 		void decodeSelected(DzNode* selectedRootNode);
-		void writeObjects(bool firstFrame) const;
+		/**
+			Write one sample per exported mesh; returns how many meshes'
+			geometry differed from their previous sample. 0 on a multi-frame
+			bake means the frame was written from a scene that did not
+			re-evaluate.
+		*/
+		int writeObjects(bool firstFrame) const;
+
+		/**
+			Ask Daz to evaluate the exported nodes' geometry NOW, via
+			DzObject::update() + finalize() - the two-step evaluation both SDKs
+			declare identically (dzobject.h DS4:78, DS6:86). This is NOT the
+			reverted per-frame forceCacheUpdate() of #2/#8: it runs only when a
+			frame was measured stale, never unconditionally. Strand-based hair
+			is skipped - force-evaluating an SBH node hangs DS6 (ticket 503956).
+		*/
+		void refreshExportedGeometry() const;
 		void setShapeNameFormatter(NodeNameFormatterCallbackType nodeNameFormatter);
 		std::string getFormattedShapeNameAsString(DzNode* node);
 		ExportableNodes getExportableNodes() const;
 
 		/** One "<mesh>: moved on N of M frames" line per exported mesh. */
 		QStringList getMotionSummary() const;
+
+		/**
+			Labels of meshes whose geometry never changed across a multi-frame
+			bake - statues. Empty on any healthy export of an animated range.
+		*/
+		QStringList getFrozenMeshes() const;
+
+		/** How many meshes the bake wrote at all. */
+		int getWrittenMeshCount() const;
 
 	private:
 		NodeNameFormatterCallbackType nodeNameFormatter_;
@@ -97,7 +132,7 @@ namespace Sagan
 		void initNormalObject(DzNode* node, const AlembicObjectPtr& parent);
 		void initGeometryShellObjectNode(DzNode* node, const AlembicObjectPtr& parent = nullptr);
 		void initObject(DzNode* node, const AlembicObjectPtr& parent, const Sagan::FaceVertexCounts& faceVertexCounts, const FaceVertexIndices& faceVertexIndices, const FacetsByMaterialIndex& facetsByMaterialIndex, const MaterialGroupNames& materialGroupNames, const UVArray& uvArray, const Visible2OriginalVertexIndices& visible2OriginalVertexIndices);
-		void writeObject(const DzNode* node, bool firstFrame) const;
+		bool writeObject(const DzNode* node, bool firstFrame) const;
 		std::shared_ptr<Alembic::AbcGeom::OObject> getTopLevelObjectPointer();
 
 		ExportableNodes m_exportableNodes;

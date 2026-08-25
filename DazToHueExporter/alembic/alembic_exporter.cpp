@@ -66,6 +66,20 @@ void DthAlembicExporter::doRomExport()
 
 		if (dthLogger_ != nullptr) dthLogger_->log(LogLevel::DTHINFO, QString("Exporting alembic frames %1 to %2").arg(startFrame).arg(endFrame));
 
+		// Staleness accounting for the loop below. setFrame() +
+		// processEvents() is a REQUEST to evaluate, not a guarantee: measured
+		// 2026-08-25 (Ita, DS4, 2.1.9), a 484-frame walk ran ~10x fast,
+		// sampled the rest pose 484 times, wrote a 23.7 MB statue archive and
+		// reported success - which then cost the previous good export its
+		// .dthprev backups. Same scene, same build, same session shape
+		// exported correctly an hour earlier; whatever suppresses evaluation
+		// is a session state, not scene data (the saved ROM has 3,978 fully
+		// keyed channels). So the loop measures whether geometry actually
+		// changed, re-asks Daz to evaluate when it did not, and the gate
+		// after the loop refuses to report a statue as success.
+		int staleFrames = 0;
+		bool previousFrameStale = false;
+
 		for (currentFrame = startFrame; currentFrame <= endFrame; currentFrame++)
 		{
 			DthFaultProbe::setFrame(currentFrame);
@@ -83,12 +97,64 @@ void DthAlembicExporter::doRomExport()
 
 			QApplication::processEvents();
 
-			alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+			// The previous frame's sample came out byte-identical for every
+			// mesh, so evaluation is not keeping up with setFrame(). Ask for
+			// it directly (update+finalize on the exported nodes) before this
+			// frame is sampled. This runs ONLY on that evidence - it is not
+			// the reverted always-on forcing of #2/#8.
+			if (previousFrameStale)
+			{
+				alembicNodeDecoder.refreshExportedGeometry();
+			}
+
+			const int meshesMoved = alembicNodeDecoder.writeObjects((currentFrame == startFrame ? true : false));
+
+			previousFrameStale = (currentFrame > startFrame && meshesMoved == 0);
+
+			if (previousFrameStale)
+			{
+				staleFrames++;
+
+				if (dthLogger_ != nullptr && (staleFrames == 1 || staleFrames % 50 == 0))
+				{
+					dthLogger_->log(LogLevel::DTHWARNGING, QString("Frame %1 sampled with NO geometry change on any mesh (%2 stale frame(s) so far) - re-requesting evaluation").arg(currentFrame).arg(staleFrames));
+				}
+			}
 
 			alembicProgress.step();
 		}
 
 		motionSummary = alembicNodeDecoder.getMotionSummary();
+
+		if (staleFrames > 0 && dthLogger_ != nullptr)
+		{
+			dthLogger_->log(LogLevel::DTHWARNGING, QString("%1 of %2 frames sampled no geometry change on any mesh").arg(staleFrames).arg(endFrame - startFrame));
+		}
+
+		// The gate. A multi-frame ROM in which NOTHING ever moved is a statue
+		// - the walk ran, the scene never followed - and reporting it as
+		// success is what destroyed a good export's backups on 2026-08-25.
+		// Throwing here reaches the caller through the same containment as
+		// every other failure: logged, script-visible, no .dth written (the
+		// manifest is written last), so the studio's export-landed guard
+		// fails the run and the backups survive.
+		const QStringList frozenMeshes = alembicNodeDecoder.getFrozenMeshes();
+
+		if (endFrame > startFrame && !frozenMeshes.isEmpty())
+		{
+			const bool everythingFrozen = frozenMeshes.count() == alembicNodeDecoder.getWrittenMeshCount();
+
+			for (const QString& label : frozenMeshes)
+			{
+				if (dthLogger_ != nullptr) dthLogger_->log(everythingFrozen ? LogLevel::DTHERROR : LogLevel::DTHWARNGING, QString("Mesh '%1' never changed across the ROM - a statue").arg(label));
+			}
+
+			if (everythingFrozen)
+			{
+				throw std::runtime_error(QString("the ROM walk ran %1 frames but the scene never re-evaluated: every one of the %2 exported meshes is a statue (identical geometry on every frame). The scene's animation data is intact; Daz did not evaluate it during the export. Close and reopen the scene (or restart Daz Studio) and export again.")
+					.arg(endFrame - startFrame + 1).arg(frozenMeshes.count()).toUtf8().constData());
+			}
+		}
 	}
 	catch (const std::exception& e)
 	{
